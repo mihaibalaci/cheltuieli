@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  cheltuieli:
+    build: .
+    container_name: cheltuieli
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DB_PATH=/app/data/cheltuieli.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/reports/available-periods"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

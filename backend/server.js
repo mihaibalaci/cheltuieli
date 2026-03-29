@@ -1,0 +1,402 @@
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const path = require('path');
+const crypto = require('crypto');
+const db = require('./db');
+const { parseABNAMROFile } = require('./parser');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+app.use(cors());
+app.use(express.json());
+
+// Serve React frontend in production
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
+
+// File upload config
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.csv', '.xlsx', '.xls', '.txt', '.mt940', '.tab'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowed.includes(ext) || ext === '');
+  }
+});
+
+// ===================== CATEGORIES =====================
+
+app.get('/api/categories', (req, res) => {
+  const cats = db.prepare(`
+    SELECT c.*, 
+           COUNT(t.id) as transaction_count,
+           COALESCE(SUM(CASE WHEN t.transaction_type='debit' THEN t.amount ELSE 0 END), 0) as total_spent
+    FROM categories c
+    LEFT JOIN transactions t ON t.category_id = c.id
+    GROUP BY c.id
+    ORDER BY c.name
+  `).all();
+  res.json(cats);
+});
+
+app.post('/api/categories', (req, res) => {
+  const { name, color, icon, parent_id } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name required' });
+  try {
+    const result = db.prepare(
+      'INSERT INTO categories (name, color, icon, parent_id) VALUES (?, ?, ?, ?)'
+    ).run(name.trim(), color || '#6366f1', icon || '📦', parent_id || null);
+    const cat = db.prepare('SELECT * FROM categories WHERE id = ?').get(result.lastInsertRowid);
+    res.json(cat);
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'Category already exists' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/categories/:id', (req, res) => {
+  const { name, color, icon, parent_id } = req.body;
+  const { id } = req.params;
+  try {
+    db.prepare(`
+      UPDATE categories SET 
+        name = COALESCE(?, name),
+        color = COALESCE(?, color),
+        icon = COALESCE(?, icon),
+        parent_id = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(name, color, icon, parent_id || null, id);
+    res.json(db.prepare('SELECT * FROM categories WHERE id = ?').get(id));
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'Name already taken' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/categories/:id', (req, res) => {
+  const { id } = req.params;
+  const other = db.prepare("SELECT id FROM categories WHERE name = 'Other'").get();
+  const fallbackId = other ? other.id : null;
+  
+  db.prepare('UPDATE transactions SET category_id = ? WHERE category_id = ?').run(fallbackId, id);
+  db.prepare('UPDATE auto_rules SET category_id = ? WHERE category_id = ?').run(fallbackId, id);
+  db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+  res.json({ ok: true });
+});
+
+// ===================== TRANSACTIONS =====================
+
+app.get('/api/transactions', (req, res) => {
+  const { month, year, category_id, type, search, limit = 500, offset = 0 } = req.query;
+  
+  let where = [];
+  let params = [];
+
+  if (month && year) {
+    where.push("strftime('%Y-%m', date) = ?");
+    params.push(`${year}-${String(month).padStart(2, '0')}`);
+  } else if (year) {
+    where.push("strftime('%Y', date) = ?");
+    params.push(year);
+  }
+
+  if (category_id) {
+    where.push('t.category_id = ?');
+    params.push(category_id);
+  }
+
+  if (type) {
+    where.push('t.transaction_type = ?');
+    params.push(type);
+  }
+
+  if (search) {
+    where.push('(t.description LIKE ? OR t.counterparty LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
+  }
+
+  const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  
+  const total = db.prepare(`SELECT COUNT(*) as c FROM transactions t ${whereStr}`).get(...params).c;
+  const rows = db.prepare(`
+    SELECT t.*, c.name as category_name, c.color as category_color, c.icon as category_icon
+    FROM transactions t
+    LEFT JOIN categories c ON t.category_id = c.id
+    ${whereStr}
+    ORDER BY t.date DESC, t.id DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, parseInt(limit), parseInt(offset));
+
+  res.json({ transactions: rows, total, limit: parseInt(limit), offset: parseInt(offset) });
+});
+
+app.put('/api/transactions/:id', (req, res) => {
+  const { category_id, description, counterparty } = req.body;
+  db.prepare(`
+    UPDATE transactions SET 
+      category_id = COALESCE(?, category_id),
+      description = COALESCE(?, description),
+      counterparty = COALESCE(?, counterparty)
+    WHERE id = ?
+  `).run(category_id, description, counterparty, req.params.id);
+  res.json(db.prepare(`
+    SELECT t.*, c.name as category_name, c.color as category_color, c.icon as category_icon
+    FROM transactions t LEFT JOIN categories c ON t.category_id = c.id
+    WHERE t.id = ?
+  `).get(req.params.id));
+});
+
+app.put('/api/transactions/bulk/categorize', (req, res) => {
+  const { ids, category_id } = req.body;
+  if (!ids?.length) return res.status(400).json({ error: 'No IDs provided' });
+  const stmt = db.prepare('UPDATE transactions SET category_id = ? WHERE id = ?');
+  const update = db.transaction((ids) => ids.forEach(id => stmt.run(category_id, id)));
+  update(ids);
+  res.json({ updated: ids.length });
+});
+
+app.delete('/api/transactions/:id', (req, res) => {
+  db.prepare('DELETE FROM transactions WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ===================== IMPORT =====================
+
+app.post('/api/import', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  try {
+    const transactions = parseABNAMROFile(req.file.buffer, req.file.originalname);
+    
+    if (!transactions.length) {
+      return res.status(400).json({ error: 'No transactions found in file. Check file format.' });
+    }
+
+    const batchId = crypto.randomUUID();
+    const rules = db.prepare('SELECT keyword, category_id FROM auto_rules ORDER BY priority DESC').all();
+    
+    // Auto-categorize function
+    function autoCategory(tx) {
+      const text = `${tx.description || ''} ${tx.counterparty || ''}`.toLowerCase();
+      for (const rule of rules) {
+        if (text.includes(rule.keyword.toLowerCase())) return rule.category_id;
+      }
+      return null;
+    }
+
+    // Check for duplicates (same date + amount + description)
+    const existsStmt = db.prepare(`
+      SELECT id FROM transactions WHERE date = ? AND amount = ? AND description = ? LIMIT 1
+    `);
+
+    const insertStmt = db.prepare(`
+      INSERT INTO transactions (date, amount, description, counterparty, category_id, account_number, currency, transaction_type, source, import_batch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'import', ?)
+    `);
+
+    let inserted = 0;
+    let skipped = 0;
+    
+    // Detect month/year from transactions
+    const dates = transactions.map(t => t.date).filter(Boolean).sort();
+    const firstDate = dates[0] ? new Date(dates[0]) : new Date();
+
+    const doImport = db.transaction(() => {
+      for (const tx of transactions) {
+        const exists = existsStmt.get(tx.date, tx.amount, tx.description || '');
+        if (exists) { skipped++; continue; }
+        
+        insertStmt.run(
+          tx.date, tx.amount, tx.description || '', tx.counterparty || '',
+          autoCategory(tx), tx.account_number || '', tx.currency || 'EUR',
+          tx.transaction_type || 'debit', batchId
+        );
+        inserted++;
+      }
+    });
+
+    doImport();
+
+    // Record batch
+    db.prepare(`
+      INSERT INTO import_batches (id, filename, file_type, transaction_count, month, year)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      batchId,
+      req.file.originalname,
+      path.extname(req.file.originalname),
+      inserted,
+      firstDate.getMonth() + 1,
+      firstDate.getFullYear()
+    );
+
+    res.json({ 
+      batchId, 
+      inserted, 
+      skipped, 
+      total: transactions.length,
+      message: `Imported ${inserted} transactions (${skipped} duplicates skipped)`
+    });
+
+  } catch (e) {
+    console.error('Import error:', e);
+    res.status(500).json({ error: `Parse failed: ${e.message}` });
+  }
+});
+
+app.get('/api/import/batches', (req, res) => {
+  res.json(db.prepare('SELECT * FROM import_batches ORDER BY imported_at DESC').all());
+});
+
+// ===================== AUTO RULES =====================
+
+app.get('/api/rules', (req, res) => {
+  res.json(db.prepare(`
+    SELECT r.*, c.name as category_name, c.color as category_color, c.icon as category_icon
+    FROM auto_rules r LEFT JOIN categories c ON r.category_id = c.id
+    ORDER BY r.priority DESC, r.keyword
+  `).all());
+});
+
+app.post('/api/rules', (req, res) => {
+  const { keyword, category_id, match_field, priority } = req.body;
+  if (!keyword || !category_id) return res.status(400).json({ error: 'keyword and category_id required' });
+  const result = db.prepare(
+    'INSERT INTO auto_rules (keyword, category_id, match_field, priority) VALUES (?, ?, ?, ?)'
+  ).run(keyword, category_id, match_field || 'description', priority || 0);
+  res.json(db.prepare('SELECT * FROM auto_rules WHERE id = ?').get(result.lastInsertRowid));
+});
+
+app.delete('/api/rules/:id', (req, res) => {
+  db.prepare('DELETE FROM auto_rules WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Apply rules retroactively
+app.post('/api/rules/apply', (req, res) => {
+  const rules = db.prepare('SELECT * FROM auto_rules ORDER BY priority DESC').all();
+  let updated = 0;
+  const stmt = db.prepare('UPDATE transactions SET category_id = ? WHERE id = ?');
+  
+  const txs = db.prepare('SELECT id, description, counterparty FROM transactions WHERE category_id IS NULL').all();
+  
+  db.transaction(() => {
+    for (const tx of txs) {
+      const text = `${tx.description || ''} ${tx.counterparty || ''}`.toLowerCase();
+      for (const rule of rules) {
+        if (text.includes(rule.keyword.toLowerCase())) {
+          stmt.run(rule.category_id, tx.id);
+          updated++;
+          break;
+        }
+      }
+    }
+  })();
+
+  res.json({ updated });
+});
+
+// ===================== REPORTS =====================
+
+app.get('/api/reports/summary', (req, res) => {
+  const { month, year } = req.query;
+  
+  let dateFilter = '';
+  let params = [];
+  if (month && year) {
+    dateFilter = "AND strftime('%Y-%m', date) = ?";
+    params = [`${year}-${String(month).padStart(2, '0')}`];
+  } else if (year) {
+    dateFilter = "AND strftime('%Y', date) = ?";
+    params = [year];
+  }
+
+  const byCategory = db.prepare(`
+    SELECT 
+      c.id, c.name, c.color, c.icon,
+      COUNT(t.id) as count,
+      SUM(CASE WHEN t.transaction_type='debit' THEN t.amount ELSE 0 END) as spent,
+      SUM(CASE WHEN t.transaction_type='credit' THEN t.amount ELSE 0 END) as income
+    FROM categories c
+    LEFT JOIN transactions t ON t.category_id = c.id ${dateFilter}
+    GROUP BY c.id
+    HAVING count > 0
+    ORDER BY spent DESC
+  `).all(...params);
+
+  const totals = db.prepare(`
+    SELECT 
+      SUM(CASE WHEN transaction_type='debit' THEN amount ELSE 0 END) as total_spent,
+      SUM(CASE WHEN transaction_type='credit' THEN amount ELSE 0 END) as total_income,
+      COUNT(*) as total_transactions
+    FROM transactions WHERE 1=1 ${dateFilter}
+  `).get(...params);
+
+  const uncategorized = db.prepare(`
+    SELECT COUNT(*) as c FROM transactions WHERE category_id IS NULL ${dateFilter}
+  `).get(...params).c;
+
+  res.json({ byCategory, totals, uncategorized });
+});
+
+app.get('/api/reports/monthly-trend', (req, res) => {
+  const { months = 12 } = req.query;
+  const trend = db.prepare(`
+    SELECT 
+      strftime('%Y-%m', date) as month,
+      SUM(CASE WHEN transaction_type='debit' THEN amount ELSE 0 END) as spent,
+      SUM(CASE WHEN transaction_type='credit' THEN amount ELSE 0 END) as income,
+      COUNT(*) as transactions
+    FROM transactions
+    WHERE date >= date('now', '-${parseInt(months)} months')
+    GROUP BY strftime('%Y-%m', date)
+    ORDER BY month ASC
+  `).all();
+  res.json(trend);
+});
+
+app.get('/api/reports/available-periods', (req, res) => {
+  const periods = db.prepare(`
+    SELECT DISTINCT 
+      strftime('%Y', date) as year,
+      strftime('%m', date) as month,
+      strftime('%Y-%m', date) as period,
+      COUNT(*) as count
+    FROM transactions
+    GROUP BY strftime('%Y-%m', date)
+    ORDER BY period DESC
+  `).all();
+  res.json(periods);
+});
+
+// ===================== STATS =====================
+
+app.get('/api/stats/top-merchants', (req, res) => {
+  const { month, year, limit = 10 } = req.query;
+  let dateFilter = '', params = [];
+  if (month && year) {
+    dateFilter = "AND strftime('%Y-%m', date) = ?";
+    params = [`${year}-${String(month).padStart(2, '0')}`];
+  }
+  const merchants = db.prepare(`
+    SELECT counterparty, SUM(amount) as total, COUNT(*) as count
+    FROM transactions
+    WHERE transaction_type='debit' AND counterparty != '' ${dateFilter}
+    GROUP BY counterparty
+    ORDER BY total DESC
+    LIMIT ?
+  `).all(...params, parseInt(limit));
+  res.json(merchants);
+});
+
+// SPA fallback
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🏦 Cheltuieli running on http://0.0.0.0:${PORT}\n`);
+});

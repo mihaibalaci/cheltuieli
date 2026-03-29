@@ -473,6 +473,65 @@ app.post('/api/rules/apply', (req, res) => {
 
 // ===================== REPORTS =====================
 
+// Monthly spending per category over last N months (for trend charts + insights)
+app.get('/api/reports/category-trend', (req, res) => {
+  const n = Math.min(parseInt(req.query.months || 12), 60);
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', t.date) as month,
+      c.id, c.name, c.color, c.icon,
+      SUM(CASE WHEN t.transaction_type='debit' THEN t.amount ELSE 0 END) as spent
+    FROM transactions t
+    INNER JOIN categories c ON t.category_id = c.id
+    WHERE t.date >= date('now', '-${n} months')
+    GROUP BY month, c.id
+    ORDER BY month ASC
+  `).all();
+
+  const monthSet = [...new Set(rows.map(r => r.month))].sort();
+  const catMap = {};
+  for (const r of rows) {
+    if (!catMap[r.id]) catMap[r.id] = { id: r.id, name: r.name, color: r.color, icon: r.icon, byMonth: {} };
+    catMap[r.id].byMonth[r.month] = r.spent;
+  }
+  const categories = Object.values(catMap).map(c => ({
+    id: c.id, name: c.name, color: c.color, icon: c.icon,
+    monthly: monthSet.map(m => ({ month: m, spent: c.byMonth[m] || 0 })),
+    total: monthSet.reduce((sum, m) => sum + (c.byMonth[m] || 0), 0),
+  })).sort((a, b) => b.total - a.total);
+
+  res.json({ months: monthSet, categories });
+});
+
+// Year-over-year comparison grouped by calendar month
+app.get('/api/reports/yoy', (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y', date) as year,
+      strftime('%m', date) as month,
+      SUM(CASE WHEN transaction_type='debit' THEN amount ELSE 0 END) as spent,
+      SUM(CASE WHEN transaction_type='credit' THEN amount ELSE 0 END) as income,
+      COUNT(*) as transactions
+    FROM transactions
+    GROUP BY year, month
+    ORDER BY year ASC, month ASC
+  `).all();
+
+  const years = [...new Set(rows.map(r => r.year))].sort();
+  const byMonth = {};
+  for (const r of rows) {
+    if (!byMonth[r.month]) byMonth[r.month] = { month: r.month };
+    byMonth[r.month][r.year + '_spent'] = r.spent;
+    byMonth[r.month][r.year + '_income'] = r.income;
+  }
+  const allMonths = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+  const data = allMonths
+    .filter(m => byMonth[m])
+    .map(m => ({ ...byMonth[m], monthName: new Date(2000, parseInt(m) - 1).toLocaleString('en', { month: 'short' }) }));
+
+  res.json({ years, data });
+});
+
 app.get('/api/reports/summary', (req, res) => {
   const { month, year } = req.query;
   

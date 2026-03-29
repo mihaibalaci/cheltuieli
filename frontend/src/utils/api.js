@@ -75,6 +75,8 @@ export const api = {
     return req('GET', `/reports/summary?${qs}`);
   },
   getMonthlyTrend: (months = 12) => req('GET', `/reports/monthly-trend?months=${months}`),
+  getCategoryTrend: (months = 12) => req('GET', `/reports/category-trend?months=${months}`),
+  getYoY: () => req('GET', '/reports/yoy'),
   getPeriods: () => req('GET', '/reports/available-periods'),
   getTopMerchants: (params = {}) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([,v]) => v));

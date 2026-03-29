@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { LayoutDashboard, List, Tag, Upload, Zap, TrendingDown, LogOut, Users as UsersIcon } from 'lucide-react';
+import { LayoutDashboard, List, Tag, Upload, Zap, TrendingDown, LogOut, Users as UsersIcon, BarChart2 } from 'lucide-react';
 import { api } from './utils/api';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
@@ -7,6 +7,7 @@ import Categories from './pages/Categories';
 import Import from './pages/Import';
 import Rules from './pages/Rules';
 import UsersPage from './pages/Users';
+import Reporting from './pages/Reporting';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import { Loader } from './components/UI';
@@ -15,6 +16,7 @@ const NAV = [
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
   { id: 'transactions', label: 'Transactions', icon: List },
   { id: 'categories', label: 'Categories', icon: Tag },
+  { id: 'reporting', label: 'Reporting', icon: BarChart2 },
   { id: 'import', label: 'Import', icon: Upload },
   { id: 'rules', label: 'Auto-Rules', icon: Zap },
   { id: 'users', label: 'Users', icon: UsersIcon },
@@ -79,6 +81,7 @@ export default function App() {
     dashboard: <Dashboard />,
     transactions: <Transactions categories={categories} onRefresh={loadCategories} />,
     categories: <Categories categories={categories} onRefresh={loadCategories} />,
+    reporting: <Reporting />,
     import: <Import categories={categories} onRefresh={loadCategories} />,
     rules: <Rules categories={categories} />,
     users: <UsersPage currentUser={user} />,

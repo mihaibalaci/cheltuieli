@@ -3,14 +3,88 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const db = require('./db');
 const { parseABNAMROFile } = require('./parser');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || 'cheltuieli-change-this-secret';
 
 app.use(cors());
 app.use(express.json());
+
+// Seed default admin user if no users exist
+const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+if (userCount === 0) {
+  const hash = bcrypt.hashSync('admin', 10);
+  db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run('admin', hash);
+  console.log('\n⚠️  Default user created: admin / admin — please change this password!\n');
+}
+
+// ===================== AUTH =====================
+
+function requireAuth(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    req.user = jwt.verify(header.slice(7), JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+// Protect all /api routes except /api/auth/login
+app.use('/api', (req, res, next) => {
+  if (req.path === '/auth/login') return next();
+  requireAuth(req, res, next);
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+  const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({ token, user: { id: user.id, username: user.username } });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const user = db.prepare('SELECT id, username, created_at FROM users WHERE id = ?').get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json(user);
+});
+
+app.post('/api/auth/users', (req, res) => {
+  const { username, password } = req.body;
+  if (!username?.trim() || !password) return res.status(400).json({ error: 'Username and password required' });
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  try {
+    const hash = bcrypt.hashSync(password, 10);
+    const result = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username.trim(), hash);
+    res.json({ id: result.lastInsertRowid, username: username.trim() });
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'Username already taken' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/auth/users', (req, res) => {
+  const users = db.prepare('SELECT id, username, created_at FROM users ORDER BY created_at').all();
+  res.json(users);
+});
+
+app.delete('/api/auth/users/:id', (req, res) => {
+  if (req.user.id === parseInt(req.params.id)) {
+    return res.status(400).json({ error: 'Cannot delete your own account' });
+  }
+  db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
 
 // Serve React frontend in production
 app.use(express.static(path.join(__dirname, '../frontend/dist')));

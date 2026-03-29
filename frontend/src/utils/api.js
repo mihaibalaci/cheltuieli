@@ -1,12 +1,26 @@
 const BASE = '/api';
 
+function getToken() {
+  return localStorage.getItem('token');
+}
+
 async function req(method, path, body, isForm = false) {
+  const token = getToken();
+  const headers = {};
+  if (!isForm) headers['Content-Type'] = 'application/json';
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
   const opts = {
     method,
-    headers: isForm ? {} : { 'Content-Type': 'application/json' },
+    headers,
     body: isForm ? body : body ? JSON.stringify(body) : undefined,
   };
   const res = await fetch(BASE + path, opts);
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    window.dispatchEvent(new Event('auth:logout'));
+    throw new Error('Session expired. Please log in again.');
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || 'Request failed');
@@ -15,6 +29,13 @@ async function req(method, path, body, isForm = false) {
 }
 
 export const api = {
+  // Auth
+  login: (username, password) => req('POST', '/auth/login', { username, password }),
+  me: () => req('GET', '/auth/me'),
+  getUsers: () => req('GET', '/auth/users'),
+  createUser: (username, password) => req('POST', '/auth/users', { username, password }),
+  deleteUser: (id) => req('DELETE', `/auth/users/${id}`),
+
   // Categories
   getCategories: () => req('GET', '/categories'),
   createCategory: (data) => req('POST', '/categories', data),

@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { LayoutDashboard, List, Tag, Upload, Zap, TrendingDown } from 'lucide-react';
+import { LayoutDashboard, List, Tag, Upload, Zap, TrendingDown, LogOut } from 'lucide-react';
 import { api } from './utils/api';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import Categories from './pages/Categories';
 import Import from './pages/Import';
 import Rules from './pages/Rules';
+import Login from './pages/Login';
 import { Loader } from './components/UI';
 
 const NAV = [
@@ -20,6 +21,24 @@ export default function App() {
   const [page, setPage] = useState('dashboard');
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // Check existing token on mount
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) { setAuthChecked(true); return; }
+    api.me()
+      .then(u => { setUser(u); setAuthChecked(true); })
+      .catch(() => { localStorage.removeItem('token'); setAuthChecked(true); });
+  }, []);
+
+  // Listen for session expiry triggered in api.js
+  useEffect(() => {
+    function handleLogout() { setUser(null); setCategories([]); }
+    window.addEventListener('auth:logout', handleLogout);
+    return () => window.removeEventListener('auth:logout', handleLogout);
+  }, []);
 
   const loadCategories = useCallback(() => {
     return api.getCategories().then(cats => {
@@ -28,7 +47,22 @@ export default function App() {
     }).catch(() => setLoading(false));
   }, []);
 
-  useEffect(() => { loadCategories(); }, [loadCategories]);
+  useEffect(() => {
+    if (user) loadCategories();
+  }, [user, loadCategories]);
+
+  function handleLogin(loggedInUser) {
+    setUser(loggedInUser);
+  }
+
+  function handleLogout() {
+    localStorage.removeItem('token');
+    setUser(null);
+    setCategories([]);
+  }
+
+  if (!authChecked) return <Loader text="Loading…" />;
+  if (!user) return <Login onLogin={handleLogin} />;
 
   const pages = {
     dashboard: <Dashboard />,
@@ -87,10 +121,22 @@ export default function App() {
           })}
         </div>
 
-        {/* Category count */}
-        <div style={{ padding: '0 20px' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', padding: '10px 0', borderTop: '1px solid var(--border)' }}>
-            {categories.length} categories · ABN AMRO
+        {/* Footer: user + logout */}
+        <div style={{ padding: '0 12px' }}>
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, paddingLeft: 4 }}>
+              {user.username} · {categories.length} categories
+            </div>
+            <button onClick={handleLogout} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+              padding: '8px 12px', borderRadius: 8,
+              background: 'transparent', border: '1px solid transparent',
+              color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13,
+              fontFamily: 'inherit', transition: 'all 0.15s', textAlign: 'left',
+            }}>
+              <LogOut size={14} />
+              Sign out
+            </button>
           </div>
         </div>
       </nav>

@@ -67,6 +67,15 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    email TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
   );
 
@@ -74,6 +83,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);
   CREATE INDEX IF NOT EXISTS idx_transactions_batch ON transactions(import_batch);
 `);
+
+// Migrate: add email column to users if it doesn't exist yet
+try { db.exec("ALTER TABLE users ADD COLUMN email TEXT"); } catch {}
 
 // Seed default categories if empty
 const catCount = db.prepare('SELECT COUNT(*) as c FROM categories').get();

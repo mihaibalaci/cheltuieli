@@ -33,8 +33,12 @@ export const api = {
   login: (username, password) => req('POST', '/auth/login', { username, password }),
   me: () => req('GET', '/auth/me'),
   getUsers: () => req('GET', '/auth/users'),
-  createUser: (username, password) => req('POST', '/auth/users', { username, password }),
+  createUser: (username, password, email) => req('POST', '/auth/users', { username, password, email }),
+  updateUser: (id, data) => req('PUT', `/auth/users/${id}`, data),
   deleteUser: (id) => req('DELETE', `/auth/users/${id}`),
+  changePassword: (current_password, new_password) => req('PUT', '/auth/password', { current_password, new_password }),
+  forgotPassword: (email) => req('POST', '/auth/forgot-password', { email }),
+  resetPassword: (token, new_password) => req('POST', '/auth/reset-password', { token, new_password }),
 
   // Categories
   getCategories: () => req('GET', '/categories'),

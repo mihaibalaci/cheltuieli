@@ -5,12 +5,48 @@ const path = require('path');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 const db = require('./db');
 const { parseABNAMROFile } = require('./parser');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'cheltuieli-change-this-secret';
+const APP_URL = process.env.APP_URL || 'http://172.16.10.26:3001';
+
+// ===================== EMAIL =====================
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+async function sendResetEmail(to, username, token) {
+  const resetUrl = `${APP_URL}/?reset_token=${token}`;
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to,
+    subject: 'Cheltuieli — Password Reset',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+        <h2 style="color:#c8f135">Cheltuieli Finance Tracker</h2>
+        <p>Hi <strong>${username}</strong>,</p>
+        <p>Someone requested a password reset for your account. Click the button below to set a new password:</p>
+        <p style="margin:28px 0">
+          <a href="${resetUrl}" style="background:#c8f135;color:#0f0f0f;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">
+            Reset my password
+          </a>
+        </p>
+        <p style="color:#888;font-size:13px">This link expires in 1 hour. If you didn't request a reset, you can safely ignore this email.</p>
+      </div>
+    `,
+  });
+}
 
 app.use(cors());
 app.use(express.json());
@@ -36,9 +72,10 @@ function requireAuth(req, res, next) {
   }
 }
 
-// Protect all /api routes except /api/auth/login
+// Protect all /api routes except public auth endpoints
+const PUBLIC_PATHS = ['/auth/login', '/auth/forgot-password', '/auth/reset-password'];
 app.use('/api', (req, res, next) => {
-  if (req.path === '/auth/login') return next();
+  if (PUBLIC_PATHS.includes(req.path)) return next();
   requireAuth(req, res, next);
 });
 
@@ -83,6 +120,67 @@ app.delete('/api/auth/users/:id', (req, res) => {
     return res.status(400).json({ error: 'Cannot delete your own account' });
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Update user email or reset their password (any authenticated user)
+app.put('/api/auth/users/:id', (req, res) => {
+  const { email, password } = req.body;
+  const id = parseInt(req.params.id);
+  if (password !== undefined) {
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), id);
+  }
+  if (email !== undefined) {
+    db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email || null, id);
+  }
+  res.json(db.prepare('SELECT id, username, email, created_at FROM users WHERE id = ?').get(id));
+});
+
+// Change own password (requires current password)
+app.put('/api/auth/password', (req, res) => {
+  const { current_password, new_password } = req.body;
+  if (!current_password || !new_password) return res.status(400).json({ error: 'Both passwords required' });
+  if (new_password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!bcrypt.compareSync(current_password, user.password_hash)) {
+    return res.status(400).json({ error: 'Current password is incorrect' });
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(new_password, 10), req.user.id);
+  res.json({ ok: true });
+});
+
+// Forgot password — public (no auth required, excluded via middleware)
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  // Always respond OK to avoid leaking whether the email exists
+  if (!user) return res.json({ ok: true });
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + 3600000).toISOString(); // 1 hour
+  db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(user.id);
+  db.prepare('INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)').run(user.id, token, expires);
+  try {
+    await sendResetEmail(user.email, user.username, token);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Email send failed:', e.message);
+    res.status(500).json({ error: 'Failed to send reset email. Check SMTP configuration.' });
+  }
+});
+
+// Reset password with token — public
+app.post('/api/auth/reset-password', (req, res) => {
+  const { token, new_password } = req.body;
+  if (!token || !new_password) return res.status(400).json({ error: 'Token and new password required' });
+  if (new_password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const record = db.prepare('SELECT * FROM password_reset_tokens WHERE token = ?').get(token);
+  if (!record || new Date(record.expires_at) < new Date()) {
+    return res.status(400).json({ error: 'Reset link is invalid or has expired' });
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(new_password, 10), record.user_id);
+  db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
   res.json({ ok: true });
 });
 

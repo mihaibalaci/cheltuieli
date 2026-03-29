@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { LayoutDashboard, List, Tag, Upload, Zap, TrendingDown, LogOut } from 'lucide-react';
+import { LayoutDashboard, List, Tag, Upload, Zap, TrendingDown, LogOut, Users as UsersIcon } from 'lucide-react';
 import { api } from './utils/api';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import Categories from './pages/Categories';
 import Import from './pages/Import';
 import Rules from './pages/Rules';
+import UsersPage from './pages/Users';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import { Loader } from './components/UI';
 
 const NAV = [
@@ -15,6 +17,7 @@ const NAV = [
   { id: 'categories', label: 'Categories', icon: Tag },
   { id: 'import', label: 'Import', icon: Upload },
   { id: 'rules', label: 'Auto-Rules', icon: Zap },
+  { id: 'users', label: 'Users', icon: UsersIcon },
 ];
 
 export default function App() {
@@ -23,6 +26,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+
+  // Check for password reset token in URL
+  const resetToken = new URLSearchParams(window.location.search).get('reset_token');
 
   // Check existing token on mount
   useEffect(() => {
@@ -61,6 +67,11 @@ export default function App() {
     setCategories([]);
   }
 
+  // Show reset password page if token is in URL (regardless of auth state)
+  if (resetToken) {
+    return <ResetPassword token={resetToken} onDone={() => { setUser(null); }} />;
+  }
+
   if (!authChecked) return <Loader text="Loading…" />;
   if (!user) return <Login onLogin={handleLogin} />;
 
@@ -70,6 +81,7 @@ export default function App() {
     categories: <Categories categories={categories} onRefresh={loadCategories} />,
     import: <Import categories={categories} onRefresh={loadCategories} />,
     rules: <Rules categories={categories} />,
+    users: <UsersPage currentUser={user} />,
   };
 
   return (

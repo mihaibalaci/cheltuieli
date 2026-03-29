@@ -151,6 +151,7 @@ describe('PUT /api/auth/password', () => {
       .put('/api/auth/password')
       .set(auth(tok2))
       .send({ current_password: 'newpass123', new_password: 'admin' });
+    expect(tok2).toBeDefined();
   });
 
   it('rejects wrong current password', async () => {
@@ -197,11 +198,11 @@ describe('Password reset flow', () => {
   });
 
   it('POST /api/auth/reset-password works with valid token', async () => {
-    // Directly insert a reset token into the DB
-    const me = (await request(app).get('/api/auth/me').set(auth(tok))).body;
+    // Get admin user id directly from db (more reliable than API call)
+    const adminUser = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
     const expires = new Date(Date.now() + 3600000).toISOString();
     db.prepare('INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)')
-      .run(me.id, 'valid-test-token-abc', expires);
+      .run(adminUser.id, 'valid-test-token-abc', expires);
 
     const res = await request(app)
       .post('/api/auth/reset-password')

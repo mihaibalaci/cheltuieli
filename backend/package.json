@@ -28,6 +28,6 @@
   "jest": {
     "testEnvironment": "node",
     "testTimeout": 15000,
-    "testPathPattern": "tests/.*\\.test\\.js$"
+    "testRegex": "tests/.*\\.test\\.js$"
   }
 }

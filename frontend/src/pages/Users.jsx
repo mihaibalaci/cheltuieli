@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { UserPlus, Trash2, KeyRound, Save, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { UserPlus, Trash2, KeyRound, Save, ChevronDown, ChevronUp, Download, Upload, AlertTriangle } from 'lucide-react';
 import { api } from '../utils/api';
 
 function Section({ title, children }) {
@@ -72,6 +72,13 @@ export default function Users({ currentUser }) {
   // Per-user reset password state
   const [resetingId, setResetingId] = useState(null);
   const [resetPw, setResetPw] = useState('');
+
+  // Backup/restore state
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const [restoreFile, setRestoreFile] = useState(null);
+  const restoreInputRef = useRef(null);
 
   function showToast(msg, isError = false) {
     setToast({ msg, isError });
@@ -155,6 +162,33 @@ export default function Users({ currentUser }) {
     }
   }
 
+  async function handleBackup() {
+    setBackingUp(true);
+    try {
+      await api.backup();
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBackingUp(false);
+    }
+  }
+
+  async function handleRestore() {
+    if (!restoreFile) return;
+    setRestoring(true);
+    try {
+      await api.restore(restoreFile);
+      showToast('Database restored. The server is restarting, please wait a moment then refresh.');
+      setRestoreFile(null);
+      setRestoreConfirm(false);
+      if (restoreInputRef.current) restoreInputRef.current.value = '';
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setRestoring(false);
+    }
+  }
+
   async function handleUpdateEmail(userId, newEmail) {
     try {
       await api.updateUser(userId, { email: newEmail });
@@ -221,6 +255,73 @@ export default function Users({ currentUser }) {
               {savingPw ? 'Updating…' : 'Update password'}
             </button>
           </form>
+        </div>
+      </Section>
+
+      {/* Data Management */}
+      <Section title="Data Management">
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>Backup</div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Download a full backup of your database including all transactions, categories, rules and users.
+          </p>
+          <button
+            onClick={handleBackup}
+            disabled={backingUp}
+            style={{ ...btnGhost, display: 'inline-flex' }}
+          >
+            <Download size={13} />
+            {backingUp ? 'Preparing…' : 'Download backup'}
+          </button>
+        </div>
+
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>Restore</div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Upload a previously downloaded backup file to restore your data. The server will restart automatically.
+          </p>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <input
+              ref={restoreInputRef}
+              type="file"
+              accept=".db"
+              onChange={e => { setRestoreFile(e.target.files[0] || null); setRestoreConfirm(false); }}
+              style={{ fontSize: 12, color: 'var(--text-muted)' }}
+            />
+            {restoreFile && !restoreConfirm && (
+              <button
+                onClick={() => setRestoreConfirm(true)}
+                style={{ ...btnDanger, padding: '7px 14px' }}
+              >
+                <Upload size={13} />
+                Restore "{restoreFile.name}"
+              </button>
+            )}
+          </div>
+
+          {restoreConfirm && (
+            <div style={{
+              marginTop: 14, background: '#ef444411', border: '1px solid #ef444433',
+              borderRadius: 8, padding: '12px 16px',
+            }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 12 }}>
+                <AlertTriangle size={16} color="#ef4444" style={{ flexShrink: 0, marginTop: 1 }} />
+                <span style={{ fontSize: 13, color: 'var(--text)' }}>
+                  This will <strong>replace all data</strong> with the backup and restart the server. Are you sure?
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={handleRestore} disabled={restoring}
+                  style={{ ...btnDanger, padding: '7px 14px', fontWeight: 600 }}>
+                  {restoring ? 'Restoring…' : 'Yes, restore now'}
+                </button>
+                <button onClick={() => setRestoreConfirm(false)} style={btnGhost}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </Section>
 

@@ -3,9 +3,12 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const Database = require('better-sqlite3');
 const db = require('./db');
 const { parseABNAMROFile } = require('./parser');
 
@@ -621,6 +624,54 @@ app.get('/api/stats/top-merchants', (req, res) => {
     LIMIT ?
   `).all(...params, parseInt(limit));
   res.json(merchants);
+});
+
+// ===================== BACKUP & RESTORE =====================
+
+const restoreUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
+
+app.get('/api/backup', async (req, res) => {
+  const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/cheltuieli.db');
+  const backupPath = path.join(os.tmpdir(), `cheltuieli_backup_${Date.now()}.db`);
+  try {
+    await db.backup(backupPath);
+    const filename = `cheltuieli-backup-${new Date().toISOString().slice(0, 10)}.db`;
+    res.download(backupPath, filename, () => {
+      try { fs.unlinkSync(backupPath); } catch {}
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Backup failed: ' + e.message });
+  }
+});
+
+app.post('/api/restore', restoreUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/cheltuieli.db');
+  const tmpPath = path.join(os.tmpdir(), `cheltuieli_restore_${Date.now()}.db`);
+  try {
+    fs.writeFileSync(tmpPath, req.file.buffer);
+    const testDb = new Database(tmpPath, { readonly: true });
+    const check = testDb.pragma('integrity_check');
+    const tables = testDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
+    testDb.close();
+    if (check[0]?.integrity_check !== 'ok') {
+      fs.unlinkSync(tmpPath);
+      return res.status(400).json({ error: 'Integrity check failed — not a valid SQLite database' });
+    }
+    const required = ['transactions', 'categories', 'users'];
+    if (!required.every(t => tables.includes(t))) {
+      fs.unlinkSync(tmpPath);
+      return res.status(400).json({ error: 'Invalid backup — missing required tables' });
+    }
+    db.close();
+    fs.copyFileSync(tmpPath, dbPath);
+    try { fs.unlinkSync(tmpPath); } catch {}
+    res.json({ ok: true, message: 'Database restored. Server is restarting…' });
+    setTimeout(() => process.exit(1), 800);
+  } catch (e) {
+    try { fs.unlinkSync(tmpPath); } catch {}
+    res.status(400).json({ error: 'Restore failed: ' + e.message });
+  }
 });
 
 // SPA fallback

@@ -69,6 +69,25 @@ export const api = {
   deleteRule: (id) => req('DELETE', `/rules/${id}`),
   applyRules: () => req('POST', '/rules/apply'),
 
+  // Backup & Restore
+  backup: async () => {
+    const token = getToken();
+    const res = await fetch(BASE + '/backup', { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error('Backup failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cheltuieli-backup-${new Date().toISOString().slice(0, 10)}.db`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  restore: (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return req('POST', '/restore', form, true);
+  },
+
   // Reports
   getSummary: (params = {}) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([,v]) => v));

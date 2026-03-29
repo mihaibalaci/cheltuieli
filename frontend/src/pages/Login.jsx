@@ -81,16 +81,18 @@ export default function Login({ onLogin }) {
         {mode === 'login' ? (
           <form onSubmit={handleLogin}>
             <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Username</label>
+              <label htmlFor="login-username" style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Username</label>
               <input
+                id="login-username"
                 type="text" value={username}
                 onChange={e => setUsername(e.target.value)}
                 autoFocus required style={inputStyle}
               />
             </div>
             <div style={{ marginBottom: 8 }}>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Password</label>
+              <label htmlFor="login-password" style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Password</label>
               <input
+                id="login-password"
                 type="password" value={password}
                 onChange={e => setPassword(e.target.value)}
                 required style={inputStyle}
@@ -139,8 +141,9 @@ export default function Login({ onLogin }) {
                   Enter your email address and we'll send you a reset link.
                 </div>
                 <div style={{ marginBottom: 20 }}>
-                  <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Email</label>
+                  <label htmlFor="forgot-email" style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Email</label>
                   <input
+                    id="forgot-email"
                     type="email" value={email}
                     onChange={e => setEmail(e.target.value)}
                     autoFocus required style={inputStyle}

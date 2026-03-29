@@ -569,6 +569,10 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🏦 Cheltuieli running on http://0.0.0.0:${PORT}\n`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n🏦 Cheltuieli running on http://0.0.0.0:${PORT}\n`);
+  });
+}
+
+module.exports = app;

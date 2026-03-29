@@ -10,7 +10,8 @@
       "Bash(git remote:*)",
       "Bash(git push:*)",
       "Bash(ssh -o StrictHostKeyChecking=accept-new root@172.16.10.26 \"echo connected\")",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(rsync -az --exclude='node_modules' --exclude='.git' --exclude='data' -e \"sshpass -p ''@@bx21'' ssh -o StrictHostKeyChecking=no\" /Users/mihai/Stuff/AI_Projects/cheltuieli/ root@172.16.10.26:/opt/cheltuieli/)"
     ]
   }
 }

@@ -390,6 +390,20 @@ app.delete('/api/transactions/month', (req, res) => {
   res.json({ deleted: result.changes });
 });
 
+app.get('/api/transactions/count', (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.json({ count: 0 });
+  const { c } = db.prepare('SELECT COUNT(*) as c FROM transactions WHERE date >= ? AND date <= ?').get(from, to);
+  res.json({ count: c });
+});
+
+app.delete('/api/transactions/range', (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
+  const result = db.prepare('DELETE FROM transactions WHERE date >= ? AND date <= ?').run(from, to);
+  res.json({ deleted: result.changes });
+});
+
 app.delete('/api/transactions/:id', (req, res) => {
   db.prepare('DELETE FROM transactions WHERE id = ?').run(req.params.id);
   res.json({ ok: true });

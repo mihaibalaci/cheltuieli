@@ -78,6 +78,8 @@ export const api = {
 
   // Delete month
   deleteMonth: (year, month) => req('DELETE', `/transactions/month?year=${year}&month=${month}`),
+  deleteRange: (from, to) => req('DELETE', `/transactions/range?from=${from}&to=${to}`),
+  countTransactions: (from, to) => req('GET', `/transactions/count?from=${from}&to=${to}`),
 
   // Backup & Restore
   backup: async () => {

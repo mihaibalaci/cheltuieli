@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Filter, RefreshCw, Trash2, Tag, Zap, X, AlertTriangle } from 'lucide-react';
+import { Search, Filter, RefreshCw, Trash2, Tag, Zap, X, AlertTriangle, CalendarX } from 'lucide-react';
 import { api } from '../utils/api';
 import { Loader, EmptyState, AmountDisplay, CategoryBadge, CategorySelect, Toast, PeriodSelector, Modal } from '../components/UI';
 
@@ -17,6 +17,11 @@ export default function Transactions({ categories, onRefresh }) {
   const [periods, setPeriods] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [showDeleteMonth, setShowDeleteMonth] = useState(false);
+  const [showDeleteRange, setShowDeleteRange] = useState(false);
+  const [deleteFrom, setDeleteFrom] = useState('');
+  const [deleteTo, setDeleteTo] = useState('');
+  const [deletePreview, setDeletePreview] = useState(null); // number | null
+  const [deleting, setDeleting] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [bulkCat, setBulkCat] = useState('');
   const [toast, setToast] = useState(null);
@@ -80,6 +85,29 @@ export default function Transactions({ categories, onRefresh }) {
     await api.updateTransaction(id, { details: details || null });
     setDetailsEdit(null);
     setTxns(prev => prev.map(t => t.id === id ? { ...t, details: details || null } : t));
+  };
+
+  const previewDeleteRange = useCallback(async (from, to) => {
+    if (!from || !to || from > to) { setDeletePreview(null); return; }
+    const { count } = await api.countTransactions(from, to).catch(() => ({ count: null }));
+    setDeletePreview(count);
+  }, []);
+
+  const handleDeleteRange = async () => {
+    if (!deleteFrom || !deleteTo || deleteFrom > deleteTo) return;
+    setDeleting(true);
+    try {
+      const result = await api.deleteRange(deleteFrom, deleteTo);
+      showToast(`${result.deleted} transactions deleted`);
+      setShowDeleteRange(false);
+      setDeleteFrom(''); setDeleteTo(''); setDeletePreview(null);
+      load();
+      onRefresh?.();
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleDeleteMonth = async () => {
@@ -228,6 +256,52 @@ export default function Transactions({ categories, onRefresh }) {
           </button>
         </div>
       </div>
+
+      {/* Delete range panel */}
+      {showDeleteRange ? (
+        <div className="card animate-fade-up" style={{ marginBottom: 16, borderColor: '#ef444433', background: '#ef444408' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <CalendarX size={15} color="#ef4444" /> Delete transactions by date range
+            </span>
+            <button onClick={() => { setShowDeleteRange(false); setDeleteFrom(''); setDeleteTo(''); setDeletePreview(null); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }}>
+              <X size={15} />
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>From</label>
+              <input type="date" className="input" style={{ width: 160 }} value={deleteFrom}
+                onChange={e => { setDeleteFrom(e.target.value); previewDeleteRange(e.target.value, deleteTo); }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>To</label>
+              <input type="date" className="input" style={{ width: 160 }} value={deleteTo}
+                onChange={e => { setDeleteTo(e.target.value); previewDeleteRange(deleteFrom, e.target.value); }} />
+            </div>
+            {deletePreview !== null && (
+              <div style={{ fontSize: 13, color: deletePreview > 0 ? '#ef4444' : 'var(--text-muted)', fontWeight: 500 }}>
+                {deletePreview > 0 ? `${deletePreview} transactions will be deleted` : 'No transactions in this range'}
+              </div>
+            )}
+            <button
+              className="btn btn-danger"
+              disabled={!deleteFrom || !deleteTo || deleteFrom > deleteTo || deletePreview === 0 || deleting}
+              onClick={handleDeleteRange}
+            >
+              <Trash2 size={13} /> {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost" style={{ fontSize: 12, color: '#ef4444', borderColor: '#ef444433' }}
+            onClick={() => setShowDeleteRange(true)}>
+            <CalendarX size={13} /> Delete by date range
+          </button>
+        </div>
+      )}
 
       {/* Bulk action bar */}
       {selected.size > 0 && (

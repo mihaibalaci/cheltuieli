@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Zap, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Zap, RefreshCw, Edit2, Save, X } from 'lucide-react';
 import { api } from '../utils/api';
 import { Toast, EmptyState, CategoryBadge, CategorySelect } from '../components/UI';
 
@@ -11,6 +11,7 @@ export default function Rules({ categories }) {
   const [toast, setToast] = useState(null);
   const [applying, setApplying] = useState(false);
   const [applyBanner, setApplyBanner] = useState(null); // { count, keyword }
+  const [editRule, setEditRule] = useState(null); // { id, keyword, match_field, category_id }
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -53,6 +54,22 @@ export default function Rules({ categories }) {
       showToast(e.message, 'error');
     } finally {
       setApplying(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editRule.keyword.trim() || !editRule.category_id) return;
+    try {
+      await api.updateRule(editRule.id, {
+        keyword: editRule.keyword.trim(),
+        category_id: parseInt(editRule.category_id),
+        match_field: editRule.match_field,
+      });
+      setEditRule(null);
+      load();
+      showToast('Rule updated');
+    } catch (e) {
+      showToast(e.message, 'error');
     }
   };
 
@@ -153,22 +170,68 @@ export default function Rules({ categories }) {
             </tr></thead>
             <tbody>
               {rules.map(r => (
-                <tr key={r.id}>
-                  <td>
-                    <span style={{ fontFamily: 'DM Mono', fontSize: 13, background: 'var(--surface2)', padding: '3px 8px', borderRadius: 6, color: 'var(--text)' }}>
-                      {r.keyword}
-                    </span>
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{r.match_field}</td>
-                  <td>
-                    <CategoryBadge name={r.category_name} color={r.category_color} icon={r.category_icon} />
-                  </td>
-                  <td>
-                    <button onClick={() => del(r.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4 }}>
-                      <Trash2 size={14} />
-                    </button>
-                  </td>
-                </tr>
+                editRule?.id === r.id ? (
+                  <tr key={r.id} style={{ background: 'var(--surface2)' }}>
+                    <td>
+                      <input
+                        className="input"
+                        style={{ fontFamily: 'DM Mono', fontSize: 13, padding: '4px 8px', width: 180 }}
+                        value={editRule.keyword}
+                        autoFocus
+                        onChange={e => setEditRule(m => ({ ...m, keyword: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditRule(null); }}
+                      />
+                    </td>
+                    <td>
+                      <select className="input" style={{ fontSize: 12 }} value={editRule.match_field}
+                        onChange={e => setEditRule(m => ({ ...m, match_field: e.target.value }))}>
+                        <option value="description">Description</option>
+                        <option value="counterparty">Counterparty</option>
+                      </select>
+                    </td>
+                    <td>
+                      <CategorySelect
+                        categories={categories}
+                        value={editRule.category_id}
+                        onChange={e => setEditRule(m => ({ ...m, category_id: e.target.value }))}
+                        style={{ fontSize: 12 }}
+                      />
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={saveEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 4 }} title="Save">
+                          <Save size={14} />
+                        </button>
+                        <button onClick={() => setEditRule(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4 }} title="Cancel">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={r.id}>
+                    <td>
+                      <span style={{ fontFamily: 'DM Mono', fontSize: 13, background: 'var(--surface2)', padding: '3px 8px', borderRadius: 6, color: 'var(--text)' }}>
+                        {r.keyword}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{r.match_field}</td>
+                    <td>
+                      <CategoryBadge name={r.category_name} color={r.category_color} icon={r.category_icon} />
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => setEditRule({ id: r.id, keyword: r.keyword, match_field: r.match_field, category_id: String(r.category_id) })}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4 }} title="Edit">
+                          <Edit2 size={14} />
+                        </button>
+                        <button onClick={() => del(r.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 4 }} title="Delete">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
               ))}
             </tbody>
           </table>

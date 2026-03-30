@@ -66,6 +66,7 @@ export const api = {
   // Rules
   getRules: () => req('GET', '/rules'),
   createRule: (data) => req('POST', '/rules', data),
+  updateRule: (id, data) => req('PUT', `/rules/${id}`, data),
   deleteRule: (id) => req('DELETE', `/rules/${id}`),
   applyRules: () => req('POST', '/rules/apply'),
 

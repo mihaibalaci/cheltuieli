@@ -449,6 +449,20 @@ app.post('/api/rules', (req, res) => {
   res.json(db.prepare('SELECT * FROM auto_rules WHERE id = ?').get(result.lastInsertRowid));
 });
 
+app.put('/api/rules/:id', (req, res) => {
+  const { keyword, category_id, match_field, priority } = req.body;
+  if (!keyword || !category_id) return res.status(400).json({ error: 'keyword and category_id required' });
+  db.prepare(`
+    UPDATE auto_rules SET keyword = ?, category_id = ?, match_field = ?, priority = COALESCE(?, priority)
+    WHERE id = ?
+  `).run(keyword, category_id, match_field || 'description', priority ?? null, req.params.id);
+  res.json(db.prepare(`
+    SELECT r.*, c.name as category_name, c.color as category_color, c.icon as category_icon
+    FROM auto_rules r LEFT JOIN categories c ON r.category_id = c.id
+    WHERE r.id = ?
+  `).get(req.params.id));
+});
+
 app.delete('/api/rules/:id', (req, res) => {
   db.prepare('DELETE FROM auto_rules WHERE id = ?').run(req.params.id);
   res.json({ ok: true });

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, RefreshCw } from 'lucide-react';
+import { Save, RefreshCw, Wifi } from 'lucide-react';
 import { api } from '../utils/api';
 import { Toast } from '../components/UI';
 
@@ -46,6 +46,7 @@ const btnPrimary = {
 export default function Settings() {
   const [settings, setSettings] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
 
   function showToast(message, type = 'success') {
@@ -56,6 +57,20 @@ export default function Settings() {
   useEffect(() => {
     api.getSettings().then(setSettings).catch(() => showToast('Failed to load settings', 'error'));
   }, []);
+
+  async function handleRefreshRates() {
+    setRefreshing(true);
+    try {
+      await api.refreshRates();
+      const updated = await api.getSettings();
+      setSettings(updated);
+      showToast('Exchange rates updated from ECB');
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -133,11 +148,31 @@ export default function Settings() {
         </div>
 
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 18 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 12 }}>
-            Exchange rates to {settings.default_currency}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+              Exchange rates to {settings.default_currency}
+            </div>
+            <button
+              onClick={handleRefreshRates}
+              disabled={refreshing}
+              style={{
+                background: 'none', border: '1px solid var(--border)', borderRadius: 6,
+                color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer',
+                padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
+                fontFamily: 'inherit',
+              }}
+            >
+              <Wifi size={12} style={refreshing ? { animation: 'spin 1s linear infinite' } : {}} />
+              {refreshing ? 'Fetching…' : 'Refresh from ECB'}
+            </button>
           </div>
+          {settings.fx_updated_at && (
+            <p style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10 }}>
+              Last updated: {new Date(settings.fx_updated_at).toLocaleString()}
+            </p>
+          )}
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
-            Set how much 1 unit of each currency equals in {settings.default_currency}. Used when converting mixed-currency transactions in reports.
+            Rates are fetched automatically from the European Central Bank on every login. You can also update them manually.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {CURRENCIES.filter(c => c !== settings.default_currency).map(c => (

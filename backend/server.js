@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
+const https = require('https');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
@@ -222,6 +223,56 @@ app.put('/api/settings', (req, res) => {
   const obj = {};
   rows.forEach(r => obj[r.key] = r.value);
   res.json(obj);
+});
+
+// Fetch live ECB rates and update settings. ECB publishes daily EUR base rates.
+// Returns { updated: true, rates: {...} } or throws on failure.
+function fetchECBRates() {
+  return new Promise((resolve, reject) => {
+    const url = 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml';
+    https.get(url, { timeout: 8000 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          // ECB XML: <Cube currency='USD' rate='1.0823'/>
+          // Rates are units-per-1-EUR, so invert to get EUR-per-unit
+          const currencies = ['RON', 'USD', 'EUR'];
+          const upsert = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+          const rates = {};
+
+          for (const cur of currencies) {
+            if (cur === 'EUR') {
+              rates['fx_EUR'] = 1.0;
+              upsert.run('fx_EUR', '1.0000');
+              continue;
+            }
+            const m = data.match(new RegExp(`currency='${cur}'\\s+rate='([\\d.]+)'`));
+            if (m) {
+              const perEur = parseFloat(m[1]);
+              const eurPer = (1 / perEur).toFixed(6);
+              rates[`fx_${cur}`] = parseFloat(eurPer);
+              upsert.run(`fx_${cur}`, eurPer);
+            }
+          }
+
+          upsert.run('fx_updated_at', new Date().toISOString());
+          resolve({ updated: true, rates });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }).on('error', reject).on('timeout', () => reject(new Error('ECB request timed out')));
+  });
+}
+
+app.post('/api/settings/refresh-rates', async (req, res) => {
+  try {
+    const result = await fetchECBRates();
+    res.json(result);
+  } catch (e) {
+    res.status(502).json({ error: 'Failed to fetch ECB rates: ' + e.message });
+  }
 });
 
 // Helper: build SQL CASE expression for FX-converting amount to EUR

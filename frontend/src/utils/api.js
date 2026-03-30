@@ -73,6 +73,7 @@ export const api = {
   // Settings
   getSettings: () => req('GET', '/settings'),
   updateSettings: (data) => req('PUT', '/settings', data),
+  refreshRates: () => req('POST', '/settings/refresh-rates'),
 
   // Accounts
   getAccounts: () => req('GET', '/accounts'),

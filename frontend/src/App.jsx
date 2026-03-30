@@ -59,7 +59,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (user) loadCategories();
+    if (user) {
+      loadCategories();
+      // Refresh ECB exchange rates silently in the background
+      api.refreshRates().catch(() => {});
+    }
   }, [user, loadCategories]);
 
   function handleLogin(loggedInUser) {

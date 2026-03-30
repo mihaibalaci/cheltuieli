@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Filter, RefreshCw, Trash2, Tag } from 'lucide-react';
+import { Search, Filter, RefreshCw, Trash2, Tag, Zap, X } from 'lucide-react';
 import { api } from '../utils/api';
-import { Loader, EmptyState, AmountDisplay, CategoryBadge, CategorySelect, Toast, PeriodSelector } from '../components/UI';
+import { Loader, EmptyState, AmountDisplay, CategoryBadge, CategorySelect, Toast, PeriodSelector, Modal } from '../components/UI';
 
 const PAGE = 100;
 
@@ -19,6 +19,7 @@ export default function Transactions({ categories, onRefresh }) {
   const [toast, setToast] = useState(null);
   const [inlineEdit, setInlineEdit] = useState(null); // id of row with category select open
   const [detailsEdit, setDetailsEdit] = useState(null); // { id, value }
+  const [ruleModal, setRuleModal] = useState(null); // { keyword, field, category_id }
   const searchTimer = useRef(null);
 
   const showToast = (message, type = 'success') => {
@@ -77,6 +78,28 @@ export default function Transactions({ categories, onRefresh }) {
     setTxns(prev => prev.map(t => t.id === id ? { ...t, details: details || null } : t));
   };
 
+  const openRuleModal = (tx) => {
+    setRuleModal({
+      keyword: tx.description || tx.counterparty || '',
+      field: tx.description ? 'description' : 'counterparty',
+      category_id: tx.category_id ? String(tx.category_id) : '',
+    });
+  };
+
+  const saveRule = async () => {
+    if (!ruleModal.keyword.trim() || !ruleModal.category_id) return;
+    try {
+      await api.createRule({ keyword: ruleModal.keyword.trim(), category_id: parseInt(ruleModal.category_id), match_field: ruleModal.field });
+      const result = await api.applyRules();
+      setRuleModal(null);
+      showToast(`Rule created · ${result.updated} transaction${result.updated !== 1 ? 's' : ''} re-categorized`);
+      load();
+      onRefresh?.();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
+
   const deleteTxn = async (id) => {
     if (!confirm('Delete this transaction?')) return;
     await api.deleteTransaction(id);
@@ -87,6 +110,36 @@ export default function Transactions({ categories, onRefresh }) {
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1300, margin: '0 auto' }}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+
+      {ruleModal && (
+        <Modal title="Create Auto-Rule" onClose={() => setRuleModal(null)}>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Keyword</label>
+            <input className="input" value={ruleModal.keyword} autoFocus
+              onChange={e => setRuleModal(m => ({ ...m, keyword: e.target.value }))}
+              onKeyDown={e => e.key === 'Enter' && saveRule()} />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Match in</label>
+            <select className="input" value={ruleModal.field} onChange={e => setRuleModal(m => ({ ...m, field: e.target.value }))}>
+              <option value="description">Description</option>
+              <option value="counterparty">Counterparty</option>
+            </select>
+          </div>
+          <div style={{ marginBottom: 22 }}>
+            <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Assign to category</label>
+            <CategorySelect categories={categories} value={ruleModal.category_id}
+              onChange={e => setRuleModal(m => ({ ...m, category_id: e.target.value }))} />
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={saveRule}
+              disabled={!ruleModal.keyword.trim() || !ruleModal.category_id}>
+              <Zap size={14} /> Save Rule & Apply
+            </button>
+            <button className="btn btn-ghost" onClick={() => setRuleModal(null)}><X size={14} /></button>
+          </div>
+        </Modal>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
@@ -165,7 +218,7 @@ export default function Transactions({ categories, onRefresh }) {
                   <th>Details</th>
                   <th>Category</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
-                  <th style={{ width: 36 }}></th>
+                  <th style={{ width: 60 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -235,10 +288,16 @@ export default function Transactions({ categories, onRefresh }) {
                       <AmountDisplay amount={tx.amount} type={tx.transaction_type} />
                     </td>
                     <td>
-                      <button onClick={() => deleteTxn(tx.id)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: '4px' }}>
-                        <Trash2 size={13} />
-                      </button>
+                      <div style={{ display: 'flex', gap: 2 }}>
+                        <button onClick={() => openRuleModal(tx)} title="Create auto-rule from this transaction"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: '4px' }}>
+                          <Zap size={13} />
+                        </button>
+                        <button onClick={() => deleteTxn(tx.id)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: '4px' }}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

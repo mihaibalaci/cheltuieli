@@ -205,13 +205,15 @@ const upload = multer({
 
 app.get('/api/categories', (req, res) => {
   const cats = db.prepare(`
-    SELECT c.*, 
+    SELECT c.*,
+           p.name as parent_name, p.icon as parent_icon, p.color as parent_color,
            COUNT(t.id) as transaction_count,
            COALESCE(SUM(CASE WHEN t.transaction_type='debit' THEN t.amount ELSE 0 END), 0) as total_spent
     FROM categories c
+    LEFT JOIN categories p ON c.parent_id = p.id
     LEFT JOIN transactions t ON t.category_id = c.id
     GROUP BY c.id
-    ORDER BY c.name
+    ORDER BY COALESCE(p.name, c.name), c.parent_id IS NULL DESC, c.name
   `).all();
   res.json(cats);
 });
@@ -310,13 +312,15 @@ app.get('/api/transactions', (req, res) => {
 
 app.put('/api/transactions/:id', (req, res) => {
   const { category_id, description, counterparty } = req.body;
-  db.prepare(`
-    UPDATE transactions SET 
-      category_id = COALESCE(?, category_id),
-      description = COALESCE(?, description),
-      counterparty = COALESCE(?, counterparty)
-    WHERE id = ?
-  `).run(category_id, description, counterparty, req.params.id);
+  const sets = [
+    'category_id = COALESCE(?, category_id)',
+    'description = COALESCE(?, description)',
+    'counterparty = COALESCE(?, counterparty)',
+  ];
+  const params = [category_id, description, counterparty];
+  if ('details' in req.body) { sets.push('details = ?'); params.push(req.body.details ?? null); }
+  params.push(req.params.id);
+  db.prepare(`UPDATE transactions SET ${sets.join(', ')} WHERE id = ?`).run(...params);
   res.json(db.prepare(`
     SELECT t.*, c.name as category_name, c.color as category_color, c.icon as category_icon
     FROM transactions t LEFT JOIN categories c ON t.category_id = c.id

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, Filter, RefreshCw, Trash2, Tag } from 'lucide-react';
 import { api } from '../utils/api';
-import { Loader, EmptyState, AmountDisplay, CategoryBadge, Toast, PeriodSelector } from '../components/UI';
+import { Loader, EmptyState, AmountDisplay, CategoryBadge, CategorySelect, Toast, PeriodSelector } from '../components/UI';
 
 const PAGE = 100;
 
@@ -17,7 +17,8 @@ export default function Transactions({ categories, onRefresh }) {
   const [selected, setSelected] = useState(new Set());
   const [bulkCat, setBulkCat] = useState('');
   const [toast, setToast] = useState(null);
-  const [inlineEdit, setInlineEdit] = useState(null);
+  const [inlineEdit, setInlineEdit] = useState(null); // id of row with category select open
+  const [detailsEdit, setDetailsEdit] = useState(null); // { id, value }
   const searchTimer = useRef(null);
 
   const showToast = (message, type = 'success') => {
@@ -63,11 +64,17 @@ export default function Transactions({ categories, onRefresh }) {
     onRefresh?.();
   };
 
-  const saveInlineEdit = async (id, category_id) => {
-    await api.updateTransaction(id, { category_id: parseInt(category_id) });
+  const saveCategory = async (id, category_id) => {
+    await api.updateTransaction(id, { category_id: category_id ? parseInt(category_id) : null });
     setInlineEdit(null);
     load();
     onRefresh?.();
+  };
+
+  const saveDetails = async (id, details) => {
+    await api.updateTransaction(id, { details: details || null });
+    setDetailsEdit(null);
+    setTxns(prev => prev.map(t => t.id === id ? { ...t, details: details || null } : t));
   };
 
   const deleteTxn = async (id) => {
@@ -78,7 +85,7 @@ export default function Transactions({ categories, onRefresh }) {
   };
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1200, margin: '0 auto' }}>
+    <div style={{ padding: '28px 32px', maxWidth: 1300, margin: '0 auto' }}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
@@ -102,11 +109,14 @@ export default function Transactions({ categories, onRefresh }) {
               value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <PeriodSelector periods={periods} value={period} onChange={setPeriod} />
-          <select className="input" style={{ width: 'auto' }} value={filterCat} onChange={e => setFilterCat(e.target.value)}>
-            <option value="">All categories</option>
-            <option value="null">Uncategorized</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-          </select>
+          <CategorySelect
+            categories={categories}
+            value={filterCat}
+            onChange={e => setFilterCat(e.target.value)}
+            style={{ width: 'auto' }}
+            emptyLabel="All categories"
+            includeEmpty
+          />
           <select className="input" style={{ width: 'auto' }} value={filterType} onChange={e => setFilterType(e.target.value)}>
             <option value="">All types</option>
             <option value="debit">Debit</option>
@@ -124,10 +134,13 @@ export default function Transactions({ categories, onRefresh }) {
         <div className="card animate-fade-up" style={{ marginBottom: 16, background: 'var(--surface2)', display: 'flex', alignItems: 'center', gap: 12 }}>
           <Tag size={14} color="var(--accent)" />
           <span style={{ fontSize: 13, color: 'var(--text)' }}>{selected.size} selected</span>
-          <select className="input" style={{ width: 200 }} value={bulkCat} onChange={e => setBulkCat(e.target.value)}>
-            <option value="">Choose category...</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-          </select>
+          <CategorySelect
+            categories={categories}
+            value={bulkCat}
+            onChange={e => setBulkCat(e.target.value)}
+            style={{ width: 220 }}
+            emptyLabel="Choose category..."
+          />
           <button className="btn btn-primary" onClick={applyBulkCat}>Apply</button>
           <button className="btn btn-ghost" onClick={() => setSelected(new Set())}>Cancel</button>
         </div>
@@ -149,6 +162,7 @@ export default function Transactions({ categories, onRefresh }) {
                   <th>Date</th>
                   <th>Description</th>
                   <th>Counterparty</th>
+                  <th>Details</th>
                   <th>Category</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
                   <th style={{ width: 36 }}></th>
@@ -156,7 +170,7 @@ export default function Transactions({ categories, onRefresh }) {
               </thead>
               <tbody>
                 {txns.map(tx => (
-                  <tr key={tx.id} style={{ opacity: selected.has(tx.id) ? 1 : undefined }}>
+                  <tr key={tx.id}>
                     <td>
                       <input type="checkbox" checked={selected.has(tx.id)} onChange={() => toggleSelect(tx.id)}
                         style={{ cursor: 'pointer', accentColor: 'var(--accent)' }} />
@@ -164,24 +178,47 @@ export default function Transactions({ categories, onRefresh }) {
                     <td style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                       {tx.date}
                     </td>
-                    <td style={{ maxWidth: 280 }}>
+                    <td style={{ maxWidth: 240 }}>
                       <span style={{ fontSize: 13, color: 'var(--text)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {tx.description || '—'}
                       </span>
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {tx.counterparty || '—'}
+                    </td>
+                    <td style={{ maxWidth: 200 }}>
+                      {detailsEdit?.id === tx.id ? (
+                        <input
+                          className="input"
+                          style={{ fontSize: 12, padding: '4px 8px', width: 180 }}
+                          value={detailsEdit.value}
+                          autoFocus
+                          onChange={e => setDetailsEdit({ id: tx.id, value: e.target.value })}
+                          onBlur={() => saveDetails(tx.id, detailsEdit.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') saveDetails(tx.id, detailsEdit.value);
+                            if (e.key === 'Escape') setDetailsEdit(null);
+                          }}
+                        />
+                      ) : (
+                        <div
+                          onClick={() => setDetailsEdit({ id: tx.id, value: tx.details || '' })}
+                          style={{ cursor: 'pointer', fontSize: 12, color: tx.details ? 'var(--text)' : 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          title={tx.details || 'Click to add details'}
+                        >
+                          {tx.details || <span style={{ fontStyle: 'italic' }}>+ add note</span>}
+                        </div>
+                      )}
                     </td>
                     <td>
                       {inlineEdit === tx.id ? (
-                        <select className="input" style={{ width: 180, fontSize: 12 }}
-                          defaultValue={tx.category_id || ''}
-                          onBlur={e => saveInlineEdit(tx.id, e.target.value)}
-                          onChange={e => saveInlineEdit(tx.id, e.target.value)}
-                          autoFocus>
-                          <option value="">Uncategorized</option>
-                          {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-                        </select>
+                        <CategorySelect
+                          categories={categories}
+                          value={tx.category_id || ''}
+                          onChange={e => saveCategory(tx.id, e.target.value)}
+                          style={{ width: 190, fontSize: 12 }}
+                          emptyLabel="Uncategorized"
+                        />
                       ) : (
                         <div onClick={() => setInlineEdit(tx.id)} style={{ cursor: 'pointer' }}>
                           {tx.category_id ? (

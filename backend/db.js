@@ -84,8 +84,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_transactions_batch ON transactions(import_batch);
 `);
 
-// Migrate: add email column to users if it doesn't exist yet
+// Migrations for existing databases
 try { db.exec("ALTER TABLE users ADD COLUMN email TEXT"); } catch {}
+try { db.exec("ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES categories(id)"); } catch {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN details TEXT"); } catch {}
 
 // Seed default categories if empty
 const catCount = db.prepare('SELECT COUNT(*) as c FROM categories').get();

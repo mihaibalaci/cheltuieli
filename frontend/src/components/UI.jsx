@@ -83,6 +83,28 @@ export function AmountDisplay({ amount, type }) {
   );
 }
 
+// Renders a <select> with categories grouped by parent.
+// Parents with subcategories show the parent as selectable, then subcategories indented.
+export function CategorySelect({ categories, value, onChange, style, className, emptyLabel = 'Select category...', includeEmpty = true }) {
+  const parents = categories.filter(c => !c.parent_id);
+  const childrenMap = {};
+  categories.filter(c => c.parent_id).forEach(c => {
+    if (!childrenMap[c.parent_id]) childrenMap[c.parent_id] = [];
+    childrenMap[c.parent_id].push(c);
+  });
+  return (
+    <select className={className || 'input'} value={value} onChange={onChange} style={style}>
+      {includeEmpty && <option value="">{emptyLabel}</option>}
+      {parents.map(p => [
+        <option key={p.id} value={p.id}>{p.icon} {p.name}</option>,
+        ...(childrenMap[p.id] || []).map(s =>
+          <option key={s.id} value={s.id}>&nbsp;&nbsp;&nbsp;↳ {s.icon} {s.name}</option>
+        ),
+      ])}
+    </select>
+  );
+}
+
 export function PeriodSelector({ periods, value, onChange }) {
   return (
     <select className="input" style={{ width: 'auto' }} value={value || ''} onChange={e => onChange(e.target.value)}>

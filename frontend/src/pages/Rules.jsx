@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, Zap, RefreshCw } from 'lucide-react';
 import { api } from '../utils/api';
-import { Toast, EmptyState, CategoryBadge } from '../components/UI';
+import { Toast, EmptyState, CategoryBadge, CategorySelect } from '../components/UI';
 
 export default function Rules({ categories }) {
   const [rules, setRules] = useState([]);
@@ -126,10 +126,12 @@ export default function Rules({ categories }) {
           </div>
           <div style={{ flex: 2, minWidth: 180 }}>
             <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>Assign to category</label>
-            <select className="input" value={catId} onChange={e => setCatId(e.target.value)}>
-              <option value="">Select category...</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-            </select>
+            <CategorySelect
+              categories={categories}
+              value={catId}
+              onChange={e => setCatId(e.target.value)}
+              emptyLabel="Select category..."
+            />
           </div>
           <button className="btn btn-primary" onClick={create} disabled={applying}>
             <Plus size={14} /> Add

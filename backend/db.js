@@ -103,10 +103,10 @@ const accountCount = db.prepare('SELECT COUNT(*) as c FROM accounts').get().c;
 if (accountCount === 0) {
   const insertAccount = db.prepare('INSERT INTO accounts (name, iban, color) VALUES (?, ?, ?)');
   [
-    ['Current Account', 'NL56ABNA0865474001', '#3b82f6'],
-    ['Savings',         'NL52ABNA0869898825', '#22c55e'],
-    ['Rent Deposit',    'NL35ABNA0880287152', '#f59e0b'],
-    ['Rent Income',     'NL49ABNA0867423439', '#8b5cf6'],
+    ['Current Account', '865474001', '#3b82f6'],
+    ['Savings',         '869898825', '#22c55e'],
+    ['Rent Deposit',    '880287152', '#f59e0b'],
+    ['Rent Income',     '867423439', '#8b5cf6'],
   ].forEach(a => insertAccount.run(...a));
 }
 

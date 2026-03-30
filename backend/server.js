@@ -210,7 +210,7 @@ app.get('/api/accounts', (req, res) => {
 app.post('/api/accounts', (req, res) => {
   const { name, iban, color } = req.body;
   if (!name?.trim() || !iban?.trim()) return res.status(400).json({ error: 'Name and IBAN required' });
-  const normalized = iban.replace(/\s+/g, '').toUpperCase();
+  const normalized = iban.replace(/\s+/g, '');
   try {
     const r = db.prepare('INSERT INTO accounts (name, iban, color) VALUES (?, ?, ?)').run(name.trim(), normalized, color || '#6366f1');
     res.json(db.prepare('SELECT * FROM accounts WHERE id = ?').get(r.lastInsertRowid));
@@ -222,7 +222,7 @@ app.post('/api/accounts', (req, res) => {
 
 app.put('/api/accounts/:id', (req, res) => {
   const { name, iban, color } = req.body;
-  const normalized = iban ? iban.replace(/\s+/g, '').toUpperCase() : undefined;
+  const normalized = iban ? iban.replace(/\s+/g, '') : undefined;
   try {
     db.prepare('UPDATE accounts SET name = COALESCE(?, name), iban = COALESCE(?, iban), color = COALESCE(?, color) WHERE id = ?')
       .run(name || null, normalized || null, color || null, req.params.id);
@@ -410,10 +410,10 @@ app.post('/api/import', upload.single('file'), (req, res) => {
     const batchId = crypto.randomUUID();
     const rules = db.prepare('SELECT keyword, category_id FROM auto_rules ORDER BY priority DESC').all();
 
-    // Build IBAN → account_id lookup (normalize: strip spaces, uppercase)
+    // Build account number → account_id lookup (normalize: strip spaces)
     const accountMap = {};
     db.prepare('SELECT id, iban FROM accounts').all().forEach(a => {
-      accountMap[a.iban.replace(/\s+/g, '').toUpperCase()] = a.id;
+      accountMap[a.iban.replace(/\s+/g, '')] = a.id;
     });
     
     // Auto-categorize function
@@ -447,7 +447,7 @@ app.post('/api/import', upload.single('file'), (req, res) => {
         const exists = existsStmt.get(tx.date, tx.amount, tx.description || '');
         if (exists) { skipped++; continue; }
         
-        const normalizedIban = (tx.account_number || '').replace(/\s+/g, '').toUpperCase();
+        const normalizedIban = (tx.account_number || '').replace(/\s+/g, '');
         const accountId = accountMap[normalizedIban] || null;
         insertStmt.run(
           tx.date, tx.amount, tx.description || '', tx.counterparty || '',

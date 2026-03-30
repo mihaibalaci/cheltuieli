@@ -48,7 +48,7 @@ export const api = {
 
   // Transactions
   getTransactions: (params = {}) => {
-    const qs = new URLSearchParams(Object.entries(params).filter(([,v]) => v != null && v !== ''));
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== ''));
     return req('GET', `/transactions?${qs}`);
   },
   updateTransaction: (id, data) => req('PUT', `/transactions/${id}`, data),
@@ -69,6 +69,15 @@ export const api = {
   updateRule: (id, data) => req('PUT', `/rules/${id}`, data),
   deleteRule: (id) => req('DELETE', `/rules/${id}`),
   applyRules: () => req('POST', '/rules/apply'),
+
+  // Accounts
+  getAccounts: () => req('GET', '/accounts'),
+  createAccount: (data) => req('POST', '/accounts', data),
+  updateAccount: (id, data) => req('PUT', `/accounts/${id}`, data),
+  deleteAccount: (id) => req('DELETE', `/accounts/${id}`),
+
+  // Delete month
+  deleteMonth: (year, month) => req('DELETE', `/transactions/month?year=${year}&month=${month}`),
 
   // Backup & Restore
   backup: async () => {

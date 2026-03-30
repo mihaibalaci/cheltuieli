@@ -201,6 +201,44 @@ const upload = multer({
   }
 });
 
+// ===================== ACCOUNTS =====================
+
+app.get('/api/accounts', (req, res) => {
+  res.json(db.prepare('SELECT * FROM accounts ORDER BY name').all());
+});
+
+app.post('/api/accounts', (req, res) => {
+  const { name, iban, color } = req.body;
+  if (!name?.trim() || !iban?.trim()) return res.status(400).json({ error: 'Name and IBAN required' });
+  const normalized = iban.replace(/\s+/g, '').toUpperCase();
+  try {
+    const r = db.prepare('INSERT INTO accounts (name, iban, color) VALUES (?, ?, ?)').run(name.trim(), normalized, color || '#6366f1');
+    res.json(db.prepare('SELECT * FROM accounts WHERE id = ?').get(r.lastInsertRowid));
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'IBAN already exists' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/accounts/:id', (req, res) => {
+  const { name, iban, color } = req.body;
+  const normalized = iban ? iban.replace(/\s+/g, '').toUpperCase() : undefined;
+  try {
+    db.prepare('UPDATE accounts SET name = COALESCE(?, name), iban = COALESCE(?, iban), color = COALESCE(?, color) WHERE id = ?')
+      .run(name || null, normalized || null, color || null, req.params.id);
+    res.json(db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id));
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'IBAN already exists' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/accounts/:id', (req, res) => {
+  db.prepare('UPDATE transactions SET account_id = NULL WHERE account_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM accounts WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ===================== CATEGORIES =====================
 
 app.get('/api/categories', (req, res) => {
@@ -267,8 +305,8 @@ app.delete('/api/categories/:id', (req, res) => {
 // ===================== TRANSACTIONS =====================
 
 app.get('/api/transactions', (req, res) => {
-  const { month, year, category_id, type, search, limit = 500, offset = 0 } = req.query;
-  
+  const { month, year, category_id, type, search, account_id, limit = 500, offset = 0 } = req.query;
+
   let where = [];
   let params = [];
 
@@ -295,13 +333,20 @@ app.get('/api/transactions', (req, res) => {
     params.push(`%${search}%`, `%${search}%`);
   }
 
+  if (account_id) {
+    where.push('t.account_id = ?');
+    params.push(account_id);
+  }
+
   const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
-  
+
   const total = db.prepare(`SELECT COUNT(*) as c FROM transactions t ${whereStr}`).get(...params).c;
   const rows = db.prepare(`
-    SELECT t.*, c.name as category_name, c.color as category_color, c.icon as category_icon
+    SELECT t.*, c.name as category_name, c.color as category_color, c.icon as category_icon,
+           a.name as account_name, a.color as account_color, a.iban as account_iban
     FROM transactions t
     LEFT JOIN categories c ON t.category_id = c.id
+    LEFT JOIN accounts a ON t.account_id = a.id
     ${whereStr}
     ORDER BY t.date DESC, t.id DESC
     LIMIT ? OFFSET ?
@@ -337,6 +382,14 @@ app.put('/api/transactions/bulk/categorize', (req, res) => {
   res.json({ updated: ids.length });
 });
 
+app.delete('/api/transactions/month', (req, res) => {
+  const { year, month } = req.query;
+  if (!year || !month) return res.status(400).json({ error: 'year and month required' });
+  const period = `${year}-${String(month).padStart(2, '0')}`;
+  const result = db.prepare("DELETE FROM transactions WHERE strftime('%Y-%m', date) = ?").run(period);
+  res.json({ deleted: result.changes });
+});
+
 app.delete('/api/transactions/:id', (req, res) => {
   db.prepare('DELETE FROM transactions WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
@@ -356,6 +409,12 @@ app.post('/api/import', upload.single('file'), (req, res) => {
 
     const batchId = crypto.randomUUID();
     const rules = db.prepare('SELECT keyword, category_id FROM auto_rules ORDER BY priority DESC').all();
+
+    // Build IBAN → account_id lookup (normalize: strip spaces, uppercase)
+    const accountMap = {};
+    db.prepare('SELECT id, iban FROM accounts').all().forEach(a => {
+      accountMap[a.iban.replace(/\s+/g, '').toUpperCase()] = a.id;
+    });
     
     // Auto-categorize function
     function autoCategory(tx) {
@@ -372,8 +431,8 @@ app.post('/api/import', upload.single('file'), (req, res) => {
     `);
 
     const insertStmt = db.prepare(`
-      INSERT INTO transactions (date, amount, description, counterparty, category_id, account_number, currency, transaction_type, source, import_batch)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'import', ?)
+      INSERT INTO transactions (date, amount, description, counterparty, category_id, account_number, account_id, currency, transaction_type, source, import_batch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'import', ?)
     `);
 
     let inserted = 0;
@@ -388,9 +447,11 @@ app.post('/api/import', upload.single('file'), (req, res) => {
         const exists = existsStmt.get(tx.date, tx.amount, tx.description || '');
         if (exists) { skipped++; continue; }
         
+        const normalizedIban = (tx.account_number || '').replace(/\s+/g, '').toUpperCase();
+        const accountId = accountMap[normalizedIban] || null;
         insertStmt.run(
           tx.date, tx.amount, tx.description || '', tx.counterparty || '',
-          autoCategory(tx), tx.account_number || '', tx.currency || 'EUR',
+          autoCategory(tx), tx.account_number || '', accountId, tx.currency || 'EUR',
           tx.transaction_type || 'debit', batchId
         );
         inserted++;

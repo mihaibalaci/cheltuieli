@@ -53,6 +53,14 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    iban TEXT NOT NULL UNIQUE,
+    color TEXT DEFAULT '#6366f1',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS import_batches (
     id TEXT PRIMARY KEY,
     filename TEXT,
@@ -88,6 +96,19 @@ db.exec(`
 try { db.exec("ALTER TABLE users ADD COLUMN email TEXT"); } catch {}
 try { db.exec("ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES categories(id)"); } catch {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN details TEXT"); } catch {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN account_id INTEGER REFERENCES accounts(id)"); } catch {}
+
+// Seed accounts if empty
+const accountCount = db.prepare('SELECT COUNT(*) as c FROM accounts').get().c;
+if (accountCount === 0) {
+  const insertAccount = db.prepare('INSERT INTO accounts (name, iban, color) VALUES (?, ?, ?)');
+  [
+    ['Current Account', 'NL56ABNA0865474001', '#3b82f6'],
+    ['Savings',         'NL52ABNA0869898825', '#22c55e'],
+    ['Rent Deposit',    'NL35ABNA0880287152', '#f59e0b'],
+    ['Rent Income',     'NL49ABNA0867423439', '#8b5cf6'],
+  ].forEach(a => insertAccount.run(...a));
+}
 
 // Seed default categories if empty
 const catCount = db.prepare('SELECT COUNT(*) as c FROM categories').get();

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { UserPlus, Trash2, KeyRound, Save, ChevronDown, ChevronUp, Download, Upload, AlertTriangle } from 'lucide-react';
+import { UserPlus, Trash2, KeyRound, Save, ChevronDown, ChevronUp, Download, Upload, AlertTriangle, Edit2, X, Plus } from 'lucide-react';
 import { api } from '../utils/api';
 
 function Section({ title, children }) {
@@ -59,6 +59,9 @@ export default function Users({ currentUser }) {
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
+  const [accounts, setAccounts] = useState([]);
+  const [editAccount, setEditAccount] = useState(null); // { id, name, iban, color }
+  const [newAccount, setNewAccount] = useState(null); // { name, iban, color }
   const [savingAccount, setSavingAccount] = useState(false);
   const [savingPw, setSavingPw] = useState(false);
 
@@ -89,8 +92,13 @@ export default function Users({ currentUser }) {
     api.getUsers().then(setUsers).catch(() => {});
   }
 
+  function loadAccounts() {
+    api.getAccounts().then(setAccounts).catch(() => {});
+  }
+
   useEffect(() => {
     loadUsers();
+    loadAccounts();
     // Pre-fill email from current user
     api.me().then(u => setEmail(u.email || '')).catch(() => {});
   }, []);
@@ -160,6 +168,37 @@ export default function Users({ currentUser }) {
     } catch (err) {
       showToast(err.message, true);
     }
+  }
+
+  async function handleSaveAccount() {
+    const a = editAccount;
+    if (!a.name?.trim() || !a.iban?.trim()) return showToast('Name and IBAN required', true);
+    try {
+      await api.updateAccount(a.id, { name: a.name.trim(), iban: a.iban.trim(), color: a.color });
+      setEditAccount(null);
+      loadAccounts();
+      showToast('Account updated');
+    } catch (err) { showToast(err.message, true); }
+  }
+
+  async function handleCreateAccount() {
+    const a = newAccount;
+    if (!a.name?.trim() || !a.iban?.trim()) return showToast('Name and IBAN required', true);
+    try {
+      await api.createAccount({ name: a.name.trim(), iban: a.iban.trim(), color: a.color || '#6366f1' });
+      setNewAccount(null);
+      loadAccounts();
+      showToast('Account created');
+    } catch (err) { showToast(err.message, true); }
+  }
+
+  async function handleDeleteAccount(acc) {
+    if (!confirm(`Delete account "${acc.name}"? Transactions will lose their account link.`)) return;
+    try {
+      await api.deleteAccount(acc.id);
+      loadAccounts();
+      showToast('Account deleted');
+    } catch (err) { showToast(err.message, true); }
   }
 
   async function handleBackup() {
@@ -256,6 +295,71 @@ export default function Users({ currentUser }) {
             </button>
           </form>
         </div>
+      </Section>
+
+      {/* Bank Accounts */}
+      <Section title="Bank Accounts">
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+          Accounts are matched automatically when importing files by IBAN. Spaces in IBANs are ignored.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          {accounts.map(acc => (
+            <div key={acc.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '10px 14px', borderRadius: 8,
+              background: 'var(--bg)', border: '1px solid var(--border)',
+            }}>
+              {editAccount?.id === acc.id ? (
+                <>
+                  <input style={{ ...inputStyle, flex: 1 }} value={editAccount.name}
+                    onChange={e => setEditAccount(a => ({ ...a, name: e.target.value }))}
+                    placeholder="Account name" autoFocus />
+                  <input style={{ ...inputStyle, flex: 2, fontFamily: 'DM Mono', fontSize: 13 }} value={editAccount.iban}
+                    onChange={e => setEditAccount(a => ({ ...a, iban: e.target.value }))}
+                    placeholder="IBAN" />
+                  <input type="color" value={editAccount.color || '#6366f1'}
+                    onChange={e => setEditAccount(a => ({ ...a, color: e.target.value }))}
+                    style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer', padding: 2, background: 'none' }} />
+                  <button onClick={handleSaveAccount} style={{ ...btnPrimary, padding: '6px 12px', fontSize: 12 }}>Save</button>
+                  <button onClick={() => setEditAccount(null)} style={{ ...btnGhost, padding: '6px 10px' }}><X size={13} /></button>
+                </>
+              ) : (
+                <>
+                  <div style={{ width: 12, height: 12, borderRadius: '50%', background: acc.color || '#6366f1', flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{acc.name}</div>
+                    <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>{acc.iban}</div>
+                  </div>
+                  <button onClick={() => setEditAccount({ ...acc })} style={btnGhost}>
+                    <Edit2 size={12} />
+                  </button>
+                  <button onClick={() => handleDeleteAccount(acc)} style={btnDanger}>
+                    <Trash2 size={12} />
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        {newAccount ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 14px', borderRadius: 8, background: 'var(--bg)', border: '1px solid var(--border)' }}>
+            <input style={{ ...inputStyle, flex: 1 }} value={newAccount.name}
+              onChange={e => setNewAccount(a => ({ ...a, name: e.target.value }))}
+              placeholder="Account name" autoFocus />
+            <input style={{ ...inputStyle, flex: 2, fontFamily: 'DM Mono', fontSize: 13 }} value={newAccount.iban}
+              onChange={e => setNewAccount(a => ({ ...a, iban: e.target.value }))}
+              placeholder="IBAN (e.g. NL56 ABNA 0865 4740 01)" />
+            <input type="color" value={newAccount.color || '#6366f1'}
+              onChange={e => setNewAccount(a => ({ ...a, color: e.target.value }))}
+              style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer', padding: 2, background: 'none' }} />
+            <button onClick={handleCreateAccount} style={{ ...btnPrimary, padding: '6px 12px', fontSize: 12 }}>Add</button>
+            <button onClick={() => setNewAccount(null)} style={{ ...btnGhost, padding: '6px 10px' }}><X size={13} /></button>
+          </div>
+        ) : (
+          <button onClick={() => setNewAccount({ name: '', iban: '', color: '#6366f1' })} style={{ ...btnGhost, display: 'inline-flex' }}>
+            <Plus size={13} /> Add account
+          </button>
+        )}
       </Section>
 
       {/* Data Management */}

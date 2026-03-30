@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Filter, RefreshCw, Trash2, Tag, Zap, X } from 'lucide-react';
+import { Search, Filter, RefreshCw, Trash2, Tag, Zap, X, AlertTriangle } from 'lucide-react';
 import { api } from '../utils/api';
 import { Loader, EmptyState, AmountDisplay, CategoryBadge, CategorySelect, Toast, PeriodSelector, Modal } from '../components/UI';
 
@@ -12,8 +12,11 @@ export default function Transactions({ categories, onRefresh }) {
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [filterAccount, setFilterAccount] = useState('');
   const [period, setPeriod] = useState('');
   const [periods, setPeriods] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [showDeleteMonth, setShowDeleteMonth] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [bulkCat, setBulkCat] = useState('');
   const [toast, setToast] = useState(null);
@@ -29,15 +32,16 @@ export default function Transactions({ categories, onRefresh }) {
 
   const load = useCallback(() => {
     setLoading(true);
-    const params = { limit: PAGE, search, category_id: filterCat, type: filterType };
+    const params = { limit: PAGE, search, category_id: filterCat, type: filterType, account_id: filterAccount };
     if (period) { const [y, m] = period.split('-'); params.year = y; params.month = m; }
     api.getTransactions(params)
       .then(data => { setTxns(data.transactions); setTotal(data.total); })
       .finally(() => setLoading(false));
-  }, [search, filterCat, filterType, period]);
+  }, [search, filterCat, filterType, filterAccount, period]);
 
   useEffect(() => {
     api.getPeriods().then(setPeriods);
+    api.getAccounts().then(setAccounts);
   }, []);
 
   useEffect(() => {
@@ -76,6 +80,19 @@ export default function Transactions({ categories, onRefresh }) {
     await api.updateTransaction(id, { details: details || null });
     setDetailsEdit(null);
     setTxns(prev => prev.map(t => t.id === id ? { ...t, details: details || null } : t));
+  };
+
+  const handleDeleteMonth = async () => {
+    const [y, m] = period.split('-');
+    try {
+      const result = await api.deleteMonth(y, m);
+      setShowDeleteMonth(false);
+      showToast(`${result.deleted} transactions deleted`);
+      load();
+      onRefresh?.();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
   };
 
   const openRuleModal = (tx) => {
@@ -141,6 +158,25 @@ export default function Transactions({ categories, onRefresh }) {
         </Modal>
       )}
 
+      {showDeleteMonth && (
+        <Modal title="Delete Entire Month" onClose={() => setShowDeleteMonth(false)}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 20 }}>
+            <AlertTriangle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: 2 }} />
+            <p style={{ fontSize: 13, color: 'var(--text)', margin: 0 }}>
+              This will permanently delete <strong>all transactions</strong> for{' '}
+              <strong>{new Date(period + '-01').toLocaleString('default', { month: 'long', year: 'numeric' })}</strong>.
+              This cannot be undone.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleDeleteMonth}>
+              Yes, delete month
+            </button>
+            <button className="btn btn-ghost" onClick={() => setShowDeleteMonth(false)}><X size={14} /></button>
+          </div>
+        </Modal>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontFamily: 'Playfair Display', fontSize: 28, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
@@ -148,9 +184,16 @@ export default function Transactions({ categories, onRefresh }) {
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>{total} records</p>
         </div>
-        <button className="btn btn-ghost" onClick={load}>
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {period && (
+            <button className="btn btn-danger" onClick={() => setShowDeleteMonth(true)}>
+              <Trash2 size={13} /> Delete Month
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={load}>
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -162,6 +205,10 @@ export default function Transactions({ categories, onRefresh }) {
               value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <PeriodSelector periods={periods} value={period} onChange={setPeriod} />
+          <select className="input" style={{ width: 'auto' }} value={filterAccount} onChange={e => setFilterAccount(e.target.value)}>
+            <option value="">All accounts</option>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
           <CategorySelect
             categories={categories}
             value={filterCat}
@@ -176,7 +223,7 @@ export default function Transactions({ categories, onRefresh }) {
             <option value="credit">Credit</option>
           </select>
           <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--text-dim)' }}
-            onClick={() => { setSearch(''); setFilterCat(''); setFilterType(''); setPeriod(''); }}>
+            onClick={() => { setSearch(''); setFilterCat(''); setFilterType(''); setFilterAccount(''); setPeriod(''); }}>
             <Filter size={13} /> Clear
           </button>
         </div>
@@ -217,6 +264,7 @@ export default function Transactions({ categories, onRefresh }) {
                   <th>Counterparty</th>
                   <th>Details</th>
                   <th>Category</th>
+                  <th>Account</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
                   <th style={{ width: 60 }}></th>
                 </tr>
@@ -282,6 +330,21 @@ export default function Transactions({ categories, onRefresh }) {
                             </span>
                           )}
                         </div>
+                      )}
+                    </td>
+                    <td>
+                      {tx.account_name ? (
+                        <span style={{
+                          fontSize: 11, fontWeight: 500, padding: '2px 7px', borderRadius: 20,
+                          background: (tx.account_color || '#6366f1') + '22',
+                          color: tx.account_color || '#6366f1',
+                          border: `1px solid ${(tx.account_color || '#6366f1')}44`,
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {tx.account_name}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>—</span>
                       )}
                     </td>
                     <td style={{ textAlign: 'right' }}>

@@ -434,8 +434,12 @@ app.get('/api/import/batches', (req, res) => {
 
 app.get('/api/rules', (req, res) => {
   res.json(db.prepare(`
-    SELECT r.*, c.name as category_name, c.color as category_color, c.icon as category_icon
-    FROM auto_rules r LEFT JOIN categories c ON r.category_id = c.id
+    SELECT r.*,
+           c.name as category_name, c.color as category_color, c.icon as category_icon,
+           p.name as parent_name, p.icon as parent_icon
+    FROM auto_rules r
+    LEFT JOIN categories c ON r.category_id = c.id
+    LEFT JOIN categories p ON c.parent_id = p.id
     ORDER BY r.priority DESC, r.keyword
   `).all());
 });

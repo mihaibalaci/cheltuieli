@@ -217,7 +217,15 @@ export default function Rules({ categories }) {
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{r.match_field}</td>
                     <td>
-                      <CategoryBadge name={r.category_name} color={r.category_color} icon={r.category_icon} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        {r.parent_name && (
+                          <>
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.parent_icon} {r.parent_name}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>›</span>
+                          </>
+                        )}
+                        <CategoryBadge name={r.category_name} color={r.category_color} icon={r.category_icon} />
+                      </div>
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>

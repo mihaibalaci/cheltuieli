@@ -70,6 +70,10 @@ export const api = {
   deleteRule: (id) => req('DELETE', `/rules/${id}`),
   applyRules: () => req('POST', '/rules/apply'),
 
+  // Settings
+  getSettings: () => req('GET', '/settings'),
+  updateSettings: (data) => req('PUT', '/settings', data),
+
   // Accounts
   getAccounts: () => req('GET', '/accounts'),
   createAccount: (data) => req('POST', '/accounts', data),

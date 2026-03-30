@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { LayoutDashboard, List, Tag, Upload, Zap, TrendingDown, LogOut, Users as UsersIcon, BarChart2 } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { LayoutDashboard, List, Tag, Upload, Zap, TrendingDown, LogOut, Users as UsersIcon, BarChart2, Settings as SettingsIcon } from 'lucide-react';
 import { api } from './utils/api';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
@@ -8,6 +8,7 @@ import Import from './pages/Import';
 import Rules from './pages/Rules';
 import UsersPage from './pages/Users';
 import Reporting from './pages/Reporting';
+import Settings from './pages/Settings';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import { Loader } from './components/UI';
@@ -20,6 +21,7 @@ const NAV = [
   { id: 'import', label: 'Import', icon: Upload },
   { id: 'rules', label: 'Auto-Rules', icon: Zap },
   { id: 'users', label: 'Users', icon: UsersIcon },
+  { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
 export default function App() {
@@ -28,6 +30,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const inactivityTimer = useRef(null);
 
   // Check for password reset token in URL
   const resetToken = new URLSearchParams(window.location.search).get('reset_token');
@@ -69,6 +72,33 @@ export default function App() {
     setCategories([]);
   }
 
+  // Inactivity timeout — reads session_timeout_minutes from settings
+  useEffect(() => {
+    if (!user) return;
+
+    let timeoutMs = 30 * 60 * 1000; // default 30 min
+    api.getSettings().then(s => {
+      const mins = parseInt(s.session_timeout_minutes);
+      if (mins > 0) timeoutMs = mins * 60 * 1000;
+    }).catch(() => {});
+
+    const reset = () => {
+      clearTimeout(inactivityTimer.current);
+      inactivityTimer.current = setTimeout(() => {
+        handleLogout();
+      }, timeoutMs);
+    };
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    reset(); // start timer immediately
+
+    return () => {
+      clearTimeout(inactivityTimer.current);
+      events.forEach(e => window.removeEventListener(e, reset));
+    };
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Show reset password page if token is in URL (regardless of auth state)
   if (resetToken) {
     return <ResetPassword token={resetToken} onDone={() => { setUser(null); }} />;
@@ -85,6 +115,7 @@ export default function App() {
     import: <Import categories={categories} onRefresh={loadCategories} />,
     rules: <Rules categories={categories} />,
     users: <UsersPage currentUser={user} />,
+    settings: <Settings />,
   };
 
   return (

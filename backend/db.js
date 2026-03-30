@@ -53,6 +53,11 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -97,6 +102,19 @@ try { db.exec("ALTER TABLE users ADD COLUMN email TEXT"); } catch {}
 try { db.exec("ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES categories(id)"); } catch {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN details TEXT"); } catch {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN account_id INTEGER REFERENCES accounts(id)"); } catch {}
+
+// Seed default settings if empty
+const settingsCount = db.prepare('SELECT COUNT(*) as c FROM settings').get().c;
+if (settingsCount === 0) {
+  const ins = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
+  [
+    ['session_timeout_minutes', '30'],
+    ['default_currency', 'EUR'],
+    ['fx_RON', '0.2007'],   // 1 RON = ~0.20 EUR
+    ['fx_USD', '0.9200'],   // 1 USD = ~0.92 EUR
+    ['fx_EUR', '1.0000'],
+  ].forEach(([k, v]) => ins.run(k, v));
+}
 
 // Seed accounts if empty
 const accountCount = db.prepare('SELECT COUNT(*) as c FROM accounts').get().c;

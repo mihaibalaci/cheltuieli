@@ -201,6 +201,40 @@ const upload = multer({
   }
 });
 
+// ===================== SETTINGS =====================
+
+app.get('/api/settings', (req, res) => {
+  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const obj = {};
+  rows.forEach(r => obj[r.key] = r.value);
+  res.json(obj);
+});
+
+app.put('/api/settings', (req, res) => {
+  const upsert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  const update = db.transaction((data) => {
+    for (const [key, value] of Object.entries(data)) {
+      upsert.run(key, String(value));
+    }
+  });
+  update(req.body);
+  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const obj = {};
+  rows.forEach(r => obj[r.key] = r.value);
+  res.json(obj);
+});
+
+// Helper: build SQL CASE expression for FX-converting amount to EUR
+function fxCaseExpr(amountCol = 't.amount') {
+  const rows = db.prepare("SELECT key, value FROM settings WHERE key LIKE 'fx_%'").all();
+  if (!rows.length) return amountCol;
+  const cases = rows.map(r => {
+    const cur = r.key.replace('fx_', '');
+    return `WHEN t.currency = '${cur}' THEN ${amountCol} * ${parseFloat(r.value)}`;
+  }).join(' ');
+  return `CASE ${cases} ELSE ${amountCol} END`;
+}
+
 // ===================== ACCOUNTS =====================
 
 app.get('/api/accounts', (req, res) => {
@@ -576,11 +610,12 @@ app.post('/api/rules/apply', (req, res) => {
 // Monthly spending per category over last N months (for trend charts + insights)
 app.get('/api/reports/category-trend', (req, res) => {
   const n = Math.min(parseInt(req.query.months || 12), 60);
+  const fx = fxCaseExpr();
   const rows = db.prepare(`
     SELECT
       strftime('%Y-%m', t.date) as month,
       c.id, c.name, c.color, c.icon,
-      SUM(CASE WHEN t.transaction_type='debit' THEN t.amount ELSE 0 END) as spent
+      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as spent
     FROM transactions t
     INNER JOIN categories c ON t.category_id = c.id
     WHERE t.date >= date('now', '-${n} months')
@@ -605,14 +640,15 @@ app.get('/api/reports/category-trend', (req, res) => {
 
 // Year-over-year comparison grouped by calendar month
 app.get('/api/reports/yoy', (req, res) => {
+  const fx = fxCaseExpr();
   const rows = db.prepare(`
     SELECT
-      strftime('%Y', date) as year,
-      strftime('%m', date) as month,
-      SUM(CASE WHEN transaction_type='debit' THEN amount ELSE 0 END) as spent,
-      SUM(CASE WHEN transaction_type='credit' THEN amount ELSE 0 END) as income,
+      strftime('%Y', t.date) as year,
+      strftime('%m', t.date) as month,
+      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as spent,
+      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END) as income,
       COUNT(*) as transactions
-    FROM transactions
+    FROM transactions t
     GROUP BY year, month
     ORDER BY year ASC, month ASC
   `).all();
@@ -634,23 +670,24 @@ app.get('/api/reports/yoy', (req, res) => {
 
 app.get('/api/reports/summary', (req, res) => {
   const { month, year } = req.query;
-  
+  const fx = fxCaseExpr();
+
   let dateFilter = '';
   let params = [];
   if (month && year) {
-    dateFilter = "AND strftime('%Y-%m', date) = ?";
+    dateFilter = "AND strftime('%Y-%m', t.date) = ?";
     params = [`${year}-${String(month).padStart(2, '0')}`];
   } else if (year) {
-    dateFilter = "AND strftime('%Y', date) = ?";
+    dateFilter = "AND strftime('%Y', t.date) = ?";
     params = [year];
   }
 
   const byCategory = db.prepare(`
-    SELECT 
+    SELECT
       c.id, c.name, c.color, c.icon,
       COUNT(t.id) as count,
-      SUM(CASE WHEN t.transaction_type='debit' THEN t.amount ELSE 0 END) as spent,
-      SUM(CASE WHEN t.transaction_type='credit' THEN t.amount ELSE 0 END) as income
+      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as spent,
+      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END) as income
     FROM categories c
     LEFT JOIN transactions t ON t.category_id = c.id ${dateFilter}
     GROUP BY c.id
@@ -659,11 +696,11 @@ app.get('/api/reports/summary', (req, res) => {
   `).all(...params);
 
   const totals = db.prepare(`
-    SELECT 
-      SUM(CASE WHEN transaction_type='debit' THEN amount ELSE 0 END) as total_spent,
-      SUM(CASE WHEN transaction_type='credit' THEN amount ELSE 0 END) as total_income,
+    SELECT
+      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as total_spent,
+      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END) as total_income,
       COUNT(*) as total_transactions
-    FROM transactions WHERE 1=1 ${dateFilter}
+    FROM transactions t WHERE 1=1 ${dateFilter}
   `).get(...params);
 
   const uncategorized = db.prepare(`
@@ -675,15 +712,16 @@ app.get('/api/reports/summary', (req, res) => {
 
 app.get('/api/reports/monthly-trend', (req, res) => {
   const { months = 12 } = req.query;
+  const fx = fxCaseExpr();
   const trend = db.prepare(`
-    SELECT 
-      strftime('%Y-%m', date) as month,
-      SUM(CASE WHEN transaction_type='debit' THEN amount ELSE 0 END) as spent,
-      SUM(CASE WHEN transaction_type='credit' THEN amount ELSE 0 END) as income,
+    SELECT
+      strftime('%Y-%m', t.date) as month,
+      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as spent,
+      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END) as income,
       COUNT(*) as transactions
-    FROM transactions
-    WHERE date >= date('now', '-${parseInt(months)} months')
-    GROUP BY strftime('%Y-%m', date)
+    FROM transactions t
+    WHERE t.date >= date('now', '-${parseInt(months)} months')
+    GROUP BY strftime('%Y-%m', t.date)
     ORDER BY month ASC
   `).all();
   res.json(trend);
@@ -707,16 +745,17 @@ app.get('/api/reports/available-periods', (req, res) => {
 
 app.get('/api/stats/top-merchants', (req, res) => {
   const { month, year, limit = 10 } = req.query;
+  const fx = fxCaseExpr();
   let dateFilter = '', params = [];
   if (month && year) {
-    dateFilter = "AND strftime('%Y-%m', date) = ?";
+    dateFilter = "AND strftime('%Y-%m', t.date) = ?";
     params = [`${year}-${String(month).padStart(2, '0')}`];
   }
   const merchants = db.prepare(`
-    SELECT counterparty, SUM(amount) as total, COUNT(*) as count
-    FROM transactions
-    WHERE transaction_type='debit' AND counterparty != '' ${dateFilter}
-    GROUP BY counterparty
+    SELECT t.counterparty, SUM(${fx}) as total, COUNT(*) as count
+    FROM transactions t
+    WHERE t.transaction_type='debit' AND t.counterparty != '' ${dateFilter}
+    GROUP BY t.counterparty
     ORDER BY total DESC
     LIMIT ?
   `).all(...params, parseInt(limit));

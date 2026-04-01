@@ -432,7 +432,7 @@ app.delete('/api/categories/:id', (req, res) => {
 // ===================== TRANSACTIONS =====================
 
 app.get('/api/transactions', (req, res) => {
-  const { month, year, category_id, type, search, account_id, limit = 500, offset = 0 } = req.query;
+  const { month, year, category_id, type, search, account_id, sort, limit = 500, offset = 0 } = req.query;
 
   let where = [];
   let params = [];
@@ -479,7 +479,7 @@ app.get('/api/transactions', (req, res) => {
     LEFT JOIN categories c ON t.category_id = c.id
     LEFT JOIN accounts a ON t.account_id = a.id
     ${whereStr}
-    ORDER BY t.date DESC, t.id DESC
+    ORDER BY t.date ${sort === 'asc' ? 'ASC' : 'DESC'}, t.id ${sort === 'asc' ? 'ASC' : 'DESC'}
     LIMIT ? OFFSET ?
   `).all(...params, parseInt(limit), parseInt(offset));
 

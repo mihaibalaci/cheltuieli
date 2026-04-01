@@ -1,4 +1,5 @@
 import { X, AlertCircle, CheckCircle, Info } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
 
 export function Modal({ title, onClose, children, width = '500px' }) {
   return (
@@ -118,4 +119,140 @@ export function PeriodSelector({ periods, value, onChange }) {
       ))}
     </select>
   );
+}
+
+
+// Searchable category dropdown with type-to-filter
+export function SearchableCategorySelect({ categories, value, onChange, style, emptyLabel = 'Select category...', includeEmpty = true, extraOptions = [] }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (open && inputRef.current) inputRef.current.focus();
+  }, [open]);
+
+  const parents = categories.filter(c => !c.parent_id);
+  const childrenMap = {};
+  categories.filter(c => c.parent_id).forEach(c => {
+    if (!childrenMap[c.parent_id]) childrenMap[c.parent_id] = [];
+    childrenMap[c.parent_id].push(c);
+  });
+
+  const lowerSearch = search.toLowerCase();
+  const matchesCat = (c) => c.name.toLowerCase().includes(lowerSearch);
+
+  // Build filtered list
+  const filtered = [];
+  for (const p of parents) {
+    const subs = (childrenMap[p.id] || []).filter(matchesCat);
+    if (matchesCat(p) || subs.length > 0) {
+      filtered.push({ ...p, _isSub: false });
+      // If parent matches, show all subs; otherwise only matching subs
+      const showSubs = matchesCat(p) ? (childrenMap[p.id] || []) : subs;
+      showSubs.forEach(s => filtered.push({ ...s, _isSub: true }));
+    }
+  }
+
+  // Find display label for current value
+  let displayLabel = emptyLabel;
+  if (value) {
+    const extra = extraOptions.find(o => String(o.value) === String(value));
+    if (extra) {
+      displayLabel = extra.label;
+    } else {
+      const cat = categories.find(c => String(c.id) === String(value));
+      if (cat) displayLabel = `${cat.icon} ${cat.name}`;
+    }
+  }
+
+  const select = (val) => {
+    onChange({ target: { value: val } });
+    setOpen(false);
+    setSearch('');
+  };
+
+  return (
+    <div ref={ref} style={{ position: 'relative', ...style }}>
+      <button
+        type="button"
+        className="input"
+        onClick={() => setOpen(!open)}
+        style={{ textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, width: '100%', minWidth: 180 }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayLabel}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-dim)', flexShrink: 0 }}>▼</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
+          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
+          marginTop: 4, boxShadow: '0 8px 32px rgba(0,0,0,0.4)', maxHeight: 280, display: 'flex', flexDirection: 'column',
+        }}>
+          <div style={{ padding: '8px 8px 4px' }}>
+            <input
+              ref={inputRef}
+              className="input"
+              placeholder="Search categories..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ fontSize: 12, padding: '6px 10px' }}
+              onKeyDown={e => { if (e.key === 'Escape') { setOpen(false); setSearch(''); } }}
+            />
+          </div>
+          <div style={{ overflowY: 'auto', maxHeight: 230 }}>
+            {includeEmpty && (
+              <div onClick={() => select('')} style={optionStyle(String(value) === '')}>
+                {emptyLabel}
+              </div>
+            )}
+            {extraOptions.map(o => (
+              <div key={o.value} onClick={() => select(o.value)} style={optionStyle(String(value) === String(o.value))}>
+                {o.label}
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--text-dim)', textAlign: 'center' }}>No categories found</div>
+            )}
+            {filtered.map(c => (
+              <div
+                key={c.id}
+                onClick={() => select(String(c.id))}
+                style={{
+                  ...optionStyle(String(value) === String(c.id)),
+                  paddingLeft: c._isSub ? 28 : 14,
+                }}
+              >
+                {c._isSub && <span style={{ color: 'var(--text-dim)', marginRight: 4 }}>↳</span>}
+                <span style={{ marginRight: 6 }}>{c.icon}</span>
+                {c.name}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function optionStyle(isActive) {
+  return {
+    padding: '7px 14px',
+    fontSize: 13,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    background: isActive ? 'var(--accent)15' : 'transparent',
+    color: isActive ? 'var(--accent)' : 'var(--text)',
+    transition: 'background 0.1s',
+  };
 }

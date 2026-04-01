@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, Filter, RefreshCw, Trash2, Tag, Zap, X, AlertTriangle, CalendarX } from 'lucide-react';
 import { api } from '../utils/api';
-import { Loader, EmptyState, AmountDisplay, CategoryBadge, CategorySelect, Toast, PeriodSelector, Modal } from '../components/UI';
+import { Loader, EmptyState, AmountDisplay, CategoryBadge, CategorySelect, Toast, PeriodSelector, Modal, SearchableCategorySelect } from '../components/UI';
 
 const PAGE = 100;
 
@@ -13,6 +13,7 @@ export default function Transactions({ categories, onRefresh, initialFilters }) 
   const [filterCat, setFilterCat] = useState(initialFilters?.uncategorized ? 'none' : '');
   const [filterType, setFilterType] = useState(initialFilters?.type || '');
   const [filterAccount, setFilterAccount] = useState('');
+  const [sortOrder, setSortOrder] = useState('desc');
   const [period, setPeriod] = useState(initialFilters?.period || '');
   const [periods, setPeriods] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -37,12 +38,12 @@ export default function Transactions({ categories, onRefresh, initialFilters }) 
 
   const load = useCallback(() => {
     setLoading(true);
-    const params = { limit: PAGE, search, category_id: filterCat, type: filterType, account_id: filterAccount };
+    const params = { limit: PAGE, search, category_id: filterCat, type: filterType, account_id: filterAccount, sort: sortOrder };
     if (period) { const [y, m] = period.split('-'); params.year = y; params.month = m; }
     api.getTransactions(params)
       .then(data => { setTxns(data.transactions); setTotal(data.total); })
       .finally(() => setLoading(false));
-  }, [search, filterCat, filterType, filterAccount, period]);
+  }, [search, filterCat, filterType, filterAccount, period, sortOrder]);
 
   useEffect(() => {
     api.getPeriods().then(setPeriods);
@@ -237,11 +238,11 @@ export default function Transactions({ categories, onRefresh, initialFilters }) 
             <option value="">All accounts</option>
             {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          <CategorySelect
+          <SearchableCategorySelect
             categories={categories}
             value={filterCat}
             onChange={e => setFilterCat(e.target.value)}
-            style={{ width: 'auto' }}
+            style={{ width: 'auto', minWidth: 180 }}
             emptyLabel="All categories"
             includeEmpty
             extraOptions={[{ value: 'none', label: '⚠ Uncategorized' }]}
@@ -251,8 +252,13 @@ export default function Transactions({ categories, onRefresh, initialFilters }) 
             <option value="debit">Debit</option>
             <option value="credit">Credit</option>
           </select>
+          <button className="btn btn-ghost" style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+            onClick={() => setSortOrder(s => s === 'desc' ? 'asc' : 'desc')}
+            title={sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}>
+            {sortOrder === 'desc' ? '↓ Newest' : '↑ Oldest'}
+          </button>
           <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--text-dim)' }}
-            onClick={() => { setSearch(''); setFilterCat(''); setFilterType(''); setFilterAccount(''); setPeriod(''); }}>
+            onClick={() => { setSearch(''); setFilterCat(''); setFilterType(''); setFilterAccount(''); setPeriod(''); setSortOrder('desc'); }}>
             <Filter size={13} /> Clear
           </button>
         </div>
@@ -388,7 +394,7 @@ export default function Transactions({ categories, onRefresh, initialFilters }) 
                     </td>
                     <td>
                       {inlineEdit === tx.id ? (
-                        <CategorySelect
+                        <SearchableCategorySelect
                           categories={categories}
                           value={tx.category_id || ''}
                           onChange={e => saveCategory(tx.id, e.target.value)}

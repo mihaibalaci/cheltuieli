@@ -1,5 +1,5 @@
 # Cheltuieli 💰
-### Personal Finance Tracker — ABN AMRO Edition
+### Personal Finance Tracker 
 
 A self-hosted web app to import, categorize, and analyze your ABN AMRO bank transactions. Built for Proxmox LXC deployment.
 

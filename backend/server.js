@@ -446,8 +446,12 @@ app.get('/api/transactions', (req, res) => {
   }
 
   if (category_id) {
-    where.push('t.category_id = ?');
-    params.push(category_id);
+    if (category_id === 'none') {
+      where.push('t.category_id IS NULL');
+    } else {
+      where.push('t.category_id = ?');
+      params.push(category_id);
+    }
   }
 
   if (type) {

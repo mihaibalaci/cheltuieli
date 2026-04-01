@@ -30,6 +30,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [navFilter, setNavFilter] = useState(null);
   const inactivityTimer = useRef(null);
 
   // Check for password reset token in URL
@@ -111,9 +112,14 @@ export default function App() {
   if (!authChecked) return <Loader text="Loading…" />;
   if (!user) return <Login onLogin={handleLogin} />;
 
+  function navigate(target, filters = null) {
+    setNavFilter(filters);
+    setPage(target);
+  }
+
   const pages = {
-    dashboard: <Dashboard />,
-    transactions: <Transactions categories={categories} onRefresh={loadCategories} />,
+    dashboard: <Dashboard onNavigate={navigate} period={navFilter?.period} />,
+    transactions: <Transactions categories={categories} onRefresh={loadCategories} initialFilters={navFilter} />,
     categories: <Categories categories={categories} onRefresh={loadCategories} />,
     reporting: <Reporting />,
     import: <Import categories={categories} onRefresh={loadCategories} />,
@@ -154,7 +160,7 @@ export default function App() {
           {NAV.map(({ id, label, icon: Icon }) => {
             const active = page === id;
             return (
-              <button key={id} onClick={() => setPage(id)}
+              <button key={id} onClick={() => { setPage(id); setNavFilter(null); }}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: 10,
                   padding: '9px 12px', borderRadius: 8, marginBottom: 2,

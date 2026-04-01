@@ -6,9 +6,12 @@ import { Loader, EmptyState, PeriodSelector, CategoryBadge } from '../components
 
 const fmt = (n) => '€' + Number(n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-function StatCard({ label, value, icon: Icon, color, sub }) {
+function StatCard({ label, value, icon: Icon, color, sub, onClick }) {
   return (
-    <div className="card" style={{ flex: 1, minWidth: 160 }}>
+    <div className="card" style={{ flex: 1, minWidth: 160, cursor: onClick ? 'pointer' : 'default', transition: 'border-color 0.15s' }}
+      onClick={onClick}
+      onMouseEnter={e => { if (onClick) e.currentTarget.style.borderColor = color; }}
+      onMouseLeave={e => { if (onClick) e.currentTarget.style.borderColor = ''; }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-dim)' }}>{label}</span>
         {Icon && <Icon size={16} color={color} />}
@@ -69,7 +72,7 @@ const CustomTooltip = ({ active, payload }) => {
   );
 };
 
-export default function Dashboard() {
+export default function Dashboard({ onNavigate }) {
   const [summary, setSummary] = useState(null);
   const [trend, setTrend] = useState([]);
   const [merchants, setMerchants] = useState([]);
@@ -139,16 +142,19 @@ export default function Dashboard() {
           <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
             <StatCard label="Total Spent" value={fmt(summary.totals?.total_spent)}
               icon={TrendingDown} color="var(--red)"
-              sub={`${summary.totals?.total_transactions || 0} transactions`} />
+              sub={`${summary.totals?.total_transactions || 0} transactions`}
+              onClick={() => onNavigate?.('transactions', { type: 'debit', period })} />
             <StatCard label="Total Income" value={fmt(summary.totals?.total_income)}
-              icon={TrendingUp} color="var(--green)" />
+              icon={TrendingUp} color="var(--green)"
+              onClick={() => onNavigate?.('transactions', { type: 'credit', period })} />
             <StatCard label="Net Balance" value={fmt(Math.abs(net))}
               icon={CreditCard} color={net >= 0 ? 'var(--green)' : 'var(--red)'}
               sub={net >= 0 ? 'surplus' : 'deficit'} />
             {summary.uncategorized > 0 && (
               <StatCard label="Uncategorized" value={summary.uncategorized}
                 icon={AlertCircle} color="var(--accent)"
-                sub="transactions need review" />
+                sub="transactions need review"
+                onClick={() => onNavigate?.('transactions', { uncategorized: true, period })} />
             )}
           </div>
 

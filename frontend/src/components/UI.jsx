@@ -85,7 +85,7 @@ export function AmountDisplay({ amount, type }) {
 
 // Renders a <select> with categories grouped by parent.
 // Parents with subcategories show the parent as selectable, then subcategories indented.
-export function CategorySelect({ categories, value, onChange, style, className, emptyLabel = 'Select category...', includeEmpty = true }) {
+export function CategorySelect({ categories, value, onChange, style, className, emptyLabel = 'Select category...', includeEmpty = true, extraOptions = [] }) {
   const parents = categories.filter(c => !c.parent_id);
   const childrenMap = {};
   categories.filter(c => c.parent_id).forEach(c => {
@@ -95,6 +95,7 @@ export function CategorySelect({ categories, value, onChange, style, className, 
   return (
     <select className={className || 'input'} value={value} onChange={onChange} style={style}>
       {includeEmpty && <option value="">{emptyLabel}</option>}
+      {extraOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       {parents.map(p => [
         <option key={p.id} value={p.id}>{p.icon} {p.name}</option>,
         ...(childrenMap[p.id] || []).map(s =>

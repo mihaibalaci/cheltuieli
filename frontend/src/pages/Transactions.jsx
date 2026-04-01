@@ -5,15 +5,15 @@ import { Loader, EmptyState, AmountDisplay, CategoryBadge, CategorySelect, Toast
 
 const PAGE = 100;
 
-export default function Transactions({ categories, onRefresh }) {
+export default function Transactions({ categories, onRefresh, initialFilters }) {
   const [txns, setTxns] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterCat, setFilterCat] = useState('');
-  const [filterType, setFilterType] = useState('');
+  const [filterCat, setFilterCat] = useState(initialFilters?.uncategorized ? 'none' : '');
+  const [filterType, setFilterType] = useState(initialFilters?.type || '');
   const [filterAccount, setFilterAccount] = useState('');
-  const [period, setPeriod] = useState('');
+  const [period, setPeriod] = useState(initialFilters?.period || '');
   const [periods, setPeriods] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [showDeleteMonth, setShowDeleteMonth] = useState(false);
@@ -244,6 +244,7 @@ export default function Transactions({ categories, onRefresh }) {
             style={{ width: 'auto' }}
             emptyLabel="All categories"
             includeEmpty
+            extraOptions={[{ value: 'none', label: '⚠ Uncategorized' }]}
           />
           <select className="input" style={{ width: 'auto' }} value={filterType} onChange={e => setFilterType(e.target.value)}>
             <option value="">All types</option>

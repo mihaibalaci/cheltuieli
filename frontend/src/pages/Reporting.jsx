@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Legend, ReferenceLine,
 } from 'recharts';
-import { TrendingUp, TrendingDown, Minus, BarChart2, GitCompare, Layers } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, BarChart2, GitCompare, Layers, Wallet } from 'lucide-react';
 import { api } from '../utils/api';
 import { Loader, EmptyState } from '../components/UI';
 
@@ -439,6 +439,7 @@ export default function Reporting() {
   const [trend, setTrend] = useState([]);
   const [catTrend, setCatTrend] = useState({ months: [], categories: [] });
   const [yoy, setYoy] = useState({ years: [], data: [] });
+  const [balances, setBalances] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -446,10 +447,12 @@ export default function Reporting() {
       api.getMonthlyTrend(18),
       api.getCategoryTrend(18),
       api.getYoY(),
-    ]).then(([t, ct, y]) => {
+      api.getAccountBalances(),
+    ]).then(([t, ct, y, b]) => {
       setTrend(t);
       setCatTrend(ct);
       setYoy(y);
+      setBalances(b);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
@@ -509,6 +512,61 @@ export default function Reporting() {
               </div>
             )}
           </div>
+
+          {/* ── Account Overview ─────────────────────────────── */}
+          {balances && balances.accounts?.length > 0 && (
+            <div className="card" style={{ marginBottom: 32 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <Wallet size={16} color="var(--accent)" />
+                <h3 style={{ ...cardTitle, marginBottom: 0 }}>Cash Overview — All Accounts</h3>
+              </div>
+              <table className="table">
+                <thead><tr>
+                  <th>Account</th>
+                  <th style={{ textAlign: 'right' }}>Money In</th>
+                  <th style={{ textAlign: 'right' }}>Money Out</th>
+                  <th style={{ textAlign: 'right' }}>Balance</th>
+                  <th style={{ textAlign: 'right' }}>Transactions</th>
+                </tr></thead>
+                <tbody>
+                  {balances.accounts.map(a => (
+                    <tr key={a.id}>
+                      <td>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: '50%', background: a.color || '#6366f1', display: 'inline-block', flexShrink: 0 }} />
+                          <span style={{ fontWeight: 500, color: 'var(--text)' }}>{a.name}</span>
+                          <span style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text-dim)' }}>{a.iban}</span>
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'DM Mono', fontSize: 13, color: 'var(--green)' }}>{fmt(a.total_in)}</td>
+                      <td style={{ textAlign: 'right', fontFamily: 'DM Mono', fontSize: 13, color: 'var(--red)' }}>{fmt(a.total_out)}</td>
+                      <td style={{ textAlign: 'right', fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color: (a.balance || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        {fmt(a.balance)}
+                      </td>
+                      <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)' }}>{a.transactions}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: '2px solid var(--border)' }}>
+                    <td style={{ fontWeight: 600, color: 'var(--text)' }}>Total across all accounts</td>
+                    <td style={{ textAlign: 'right', fontFamily: 'DM Mono', fontSize: 13, color: 'var(--green)' }}>
+                      {fmt(balances.accounts.reduce((s, a) => s + (a.total_in || 0), 0))}
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'DM Mono', fontSize: 13, color: 'var(--red)' }}>
+                      {fmt(balances.accounts.reduce((s, a) => s + (a.total_out || 0), 0))}
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'Playfair Display', fontSize: 18, fontWeight: 700, color: balances.total >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {fmt(balances.total)}
+                    </td>
+                    <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)' }}>
+                      {balances.accounts.reduce((s, a) => s + (a.transactions || 0), 0)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
 
           {/* ── Tabs ──────────────────────────────────────────── */}
           <Tabs value={tab} onChange={setTab} tabs={TABS} />

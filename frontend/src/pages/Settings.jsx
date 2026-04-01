@@ -45,6 +45,7 @@ const btnPrimary = {
 
 export default function Settings() {
   const [settings, setSettings] = useState(null);
+  const [accounts, setAccounts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
@@ -56,6 +57,7 @@ export default function Settings() {
 
   useEffect(() => {
     api.getSettings().then(setSettings).catch(() => showToast('Failed to load settings', 'error'));
+    api.getAccounts().then(setAccounts).catch(() => {});
   }, []);
 
   async function handleRefreshRates() {
@@ -197,6 +199,44 @@ export default function Settings() {
               </div>
             )}
           </div>
+        </div>
+      </Section>
+
+      {/* Account Roles */}
+      <Section
+        title="Account Roles"
+        subtitle="Configure which accounts count toward Income and Spending in reports."
+      >
+        <div style={{ marginBottom: 18 }}>
+          <label style={labelStyle}>Spending Account</label>
+          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
+            Only debits from this account count toward Total Spent.
+          </p>
+          <select style={inputStyle} value={settings.spending_account_id || ''}
+            onChange={e => set('spending_account_id', e.target.value)}>
+            <option value="">Not set (all accounts)</option>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {a.iban}</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <label style={labelStyle}>Income Account</label>
+          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
+            All credits into this account count as Income (e.g. rent collection).
+          </p>
+          <select style={inputStyle} value={settings.income_account_id || ''}
+            onChange={e => set('income_account_id', e.target.value)}>
+            <option value="">Not set (all accounts)</option>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {a.iban}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>Salary Keywords</label>
+          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
+            Credits into the spending account from counterparties matching these keywords also count as Income. Comma-separated.
+          </p>
+          <input style={inputStyle} value={settings.salary_keywords || ''}
+            onChange={e => set('salary_keywords', e.target.value)}
+            placeholder="e.g. Amazon,Workiva" />
         </div>
       </Section>
 

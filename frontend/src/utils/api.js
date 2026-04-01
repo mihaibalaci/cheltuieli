@@ -118,4 +118,8 @@ export const api = {
     const qs = new URLSearchParams(Object.entries(params).filter(([,v]) => v));
     return req('GET', `/stats/top-merchants?${qs}`);
   },
+  getAccountBalances: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([,v]) => v));
+    return req('GET', `/reports/account-balances?${qs}`);
+  },
 };

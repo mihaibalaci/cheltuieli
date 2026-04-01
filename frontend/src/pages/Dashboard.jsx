@@ -21,6 +21,41 @@ function StatCard({ label, value, icon: Icon, color, sub }) {
   );
 }
 
+function AccountBalanceCard({ accounts, total }) {
+  return (
+    <div className="card">
+      <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        Account Balances
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+        {accounts.map(a => (
+          <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: a.color || '#6366f1', flexShrink: 0 }} />
+              <span style={{ fontSize: 13, color: 'var(--text)' }}>{a.name}</span>
+            </div>
+            <span style={{
+              fontFamily: 'DM Mono', fontSize: 13, fontWeight: 500,
+              color: (a.balance || 0) >= 0 ? 'var(--green)' : 'var(--red)',
+            }}>
+              {fmt(a.balance || 0)}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total</span>
+        <span style={{
+          fontFamily: 'Playfair Display', fontSize: 20, fontWeight: 700,
+          color: total >= 0 ? 'var(--green)' : 'var(--red)',
+        }}>
+          {fmt(total)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 const CustomTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
   return (
@@ -38,6 +73,7 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [trend, setTrend] = useState([]);
   const [merchants, setMerchants] = useState([]);
+  const [balances, setBalances] = useState(null);
   const [periods, setPeriods] = useState([]);
   const [period, setPeriod] = useState('');
   const [loading, setLoading] = useState(true);
@@ -60,9 +96,11 @@ export default function Dashboard() {
     Promise.all([
       api.getSummary(params),
       api.getTopMerchants({ ...params, limit: 8 }),
-    ]).then(([s, m]) => {
+      api.getAccountBalances(params),
+    ]).then(([s, m, b]) => {
       setSummary(s);
       setMerchants(m);
+      setBalances(b);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [period]);
@@ -167,7 +205,12 @@ export default function Dashboard() {
           </div>
 
           {/* Bottom row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20 }}>
+            {/* Account Balances */}
+            {balances && balances.accounts?.length > 0 && (
+              <AccountBalanceCard accounts={balances.accounts} total={balances.total} />
+            )}
+
             {/* Category breakdown table */}
             <div className="card">
               <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.06em' }}>

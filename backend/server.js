@@ -286,6 +286,48 @@ function fxCaseExpr(amountCol = 't.amount') {
   return `CASE ${cases} ELSE ${amountCol} END`;
 }
 
+// Helper: read account role settings (spending_account_id, income_account_id, salary_keywords)
+function getAccountRoles() {
+  const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('spending_account_id','income_account_id','salary_keywords')").all();
+  const m = {};
+  rows.forEach(r => m[r.key] = r.value);
+  return {
+    spendingId: m.spending_account_id ? parseInt(m.spending_account_id) : null,
+    incomeId: m.income_account_id ? parseInt(m.income_account_id) : null,
+    salaryKeywords: (m.salary_keywords || 'Amazon,Workiva').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+  };
+}
+
+// Build SQL expression for "is this transaction income?" based on account roles
+// Income = all credits into income account + salary credits into spending account
+function incomeExpr(fx) {
+  const { spendingId, incomeId, salaryKeywords } = getAccountRoles();
+  if (!incomeId && !spendingId) {
+    // Fallback: old behavior
+    return `CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END`;
+  }
+  const parts = [];
+  if (incomeId) {
+    parts.push(`(t.transaction_type='credit' AND t.account_id = ${incomeId})`);
+  }
+  if (spendingId && salaryKeywords.length) {
+    const like = salaryKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ');
+    parts.push(`(t.transaction_type='credit' AND t.account_id = ${spendingId} AND (${like}))`);
+  }
+  const cond = parts.join(' OR ');
+  return `CASE WHEN ${cond} THEN ${fx} ELSE 0 END`;
+}
+
+// Build SQL expression for "is this transaction spending?"
+// Spending = debits from spending account only
+function spentExpr(fx) {
+  const { spendingId } = getAccountRoles();
+  if (!spendingId) {
+    return `CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END`;
+  }
+  return `CASE WHEN t.transaction_type='debit' AND t.account_id = ${spendingId} THEN ${fx} ELSE 0 END`;
+}
+
 // ===================== ACCOUNTS =====================
 
 app.get('/api/accounts', (req, res) => {
@@ -662,11 +704,12 @@ app.post('/api/rules/apply', (req, res) => {
 app.get('/api/reports/category-trend', (req, res) => {
   const n = Math.min(parseInt(req.query.months || 12), 60);
   const fx = fxCaseExpr();
+  const spent = spentExpr(fx);
   const rows = db.prepare(`
     SELECT
       strftime('%Y-%m', t.date) as month,
       c.id, c.name, c.color, c.icon,
-      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as spent
+      SUM(${spent}) as spent
     FROM transactions t
     INNER JOIN categories c ON t.category_id = c.id
     WHERE t.date >= date('now', '-${n} months')
@@ -692,12 +735,14 @@ app.get('/api/reports/category-trend', (req, res) => {
 // Year-over-year comparison grouped by calendar month
 app.get('/api/reports/yoy', (req, res) => {
   const fx = fxCaseExpr();
+  const spent = spentExpr(fx);
+  const income = incomeExpr(fx);
   const rows = db.prepare(`
     SELECT
       strftime('%Y', t.date) as year,
       strftime('%m', t.date) as month,
-      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as spent,
-      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END) as income,
+      SUM(${spent}) as spent,
+      SUM(${income}) as income,
       COUNT(*) as transactions
     FROM transactions t
     GROUP BY year, month
@@ -722,6 +767,8 @@ app.get('/api/reports/yoy', (req, res) => {
 app.get('/api/reports/summary', (req, res) => {
   const { month, year } = req.query;
   const fx = fxCaseExpr();
+  const spent = spentExpr(fx);
+  const income = incomeExpr(fx);
 
   let dateFilter = '';
   let params = [];
@@ -737,8 +784,8 @@ app.get('/api/reports/summary', (req, res) => {
     SELECT
       c.id, c.name, c.color, c.icon,
       COUNT(t.id) as count,
-      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as spent,
-      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END) as income
+      SUM(${spent}) as spent,
+      SUM(${income}) as income
     FROM categories c
     LEFT JOIN transactions t ON t.category_id = c.id ${dateFilter}
     GROUP BY c.id
@@ -748,8 +795,8 @@ app.get('/api/reports/summary', (req, res) => {
 
   const totals = db.prepare(`
     SELECT
-      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as total_spent,
-      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END) as total_income,
+      SUM(${spent}) as total_spent,
+      SUM(${income}) as total_income,
       COUNT(*) as total_transactions
     FROM transactions t WHERE 1=1 ${dateFilter}
   `).get(...params);
@@ -764,11 +811,13 @@ app.get('/api/reports/summary', (req, res) => {
 app.get('/api/reports/monthly-trend', (req, res) => {
   const { months = 12 } = req.query;
   const fx = fxCaseExpr();
+  const spent = spentExpr(fx);
+  const income = incomeExpr(fx);
   const trend = db.prepare(`
     SELECT
       strftime('%Y-%m', t.date) as month,
-      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as spent,
-      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END) as income,
+      SUM(${spent}) as spent,
+      SUM(${income}) as income,
       COUNT(*) as transactions
     FROM transactions t
     WHERE t.date >= date('now', '-${parseInt(months)} months')
@@ -797,20 +846,55 @@ app.get('/api/reports/available-periods', (req, res) => {
 app.get('/api/stats/top-merchants', (req, res) => {
   const { month, year, limit = 10 } = req.query;
   const fx = fxCaseExpr();
+  const { spendingId } = getAccountRoles();
   let dateFilter = '', params = [];
   if (month && year) {
     dateFilter = "AND strftime('%Y-%m', t.date) = ?";
     params = [`${year}-${String(month).padStart(2, '0')}`];
   }
+  const accountFilter = spendingId ? `AND t.account_id = ${spendingId}` : '';
   const merchants = db.prepare(`
     SELECT t.counterparty, SUM(${fx}) as total, COUNT(*) as count
     FROM transactions t
-    WHERE t.transaction_type='debit' AND t.counterparty != '' ${dateFilter}
+    WHERE t.transaction_type='debit' AND t.counterparty != '' ${accountFilter} ${dateFilter}
     GROUP BY t.counterparty
     ORDER BY total DESC
     LIMIT ?
   `).all(...params, parseInt(limit));
   res.json(merchants);
+});
+
+// ===================== ACCOUNT BALANCES =====================
+
+app.get('/api/reports/account-balances', (req, res) => {
+  const { month, year } = req.query;
+  const fx = fxCaseExpr();
+
+  let dateFilter = '';
+  let params = [];
+  if (month && year) {
+    dateFilter = "AND strftime('%Y-%m', t.date) = ?";
+    params = [`${year}-${String(month).padStart(2, '0')}`];
+  } else if (year) {
+    dateFilter = "AND strftime('%Y', t.date) = ?";
+    params = [year];
+  }
+
+  const balances = db.prepare(`
+    SELECT
+      a.id, a.name, a.color, a.iban,
+      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END) as total_in,
+      SUM(CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END) as total_out,
+      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE -${fx} END) as balance,
+      COUNT(t.id) as transactions
+    FROM accounts a
+    LEFT JOIN transactions t ON t.account_id = a.id ${dateFilter}
+    GROUP BY a.id
+    ORDER BY a.name
+  `).all(...params);
+
+  const total = balances.reduce((sum, b) => sum + (b.balance || 0), 0);
+  res.json({ accounts: balances, total });
 });
 
 // ===================== BACKUP & RESTORE =====================

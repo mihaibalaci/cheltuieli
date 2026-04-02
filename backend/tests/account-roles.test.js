@@ -8,12 +8,15 @@ beforeAll(async () => {
   ({ app, db, dbPath } = createApp());
   tok = await login(app);
 
-  // Get seeded accounts
+  // Get seeded accounts (IBANs: 865474001, 869898825, 880287152, 867423439)
   const accounts = (await request(app).get('/api/accounts').set(auth(tok))).body;
   // Use first two as spending/income, third as "other"
   spendingAccId = accounts[0].id;
   incomeAccId = accounts[1].id;
   otherAccId = accounts[2].id;
+  // Store IBANs for transfer tests
+  const spendingIban = accounts[0].iban;
+  const savingsIban = accounts[1].iban;
 
   // Configure account roles
   await request(app).put('/api/settings').set(auth(tok)).send({
@@ -48,37 +51,45 @@ beforeAll(async () => {
     insert.run(thisMonth, 200, 'Deposit fee', 'Bank', catId, 'debit', otherAccId);
     // Other account credit (should NOT count as income)
     insert.run(thisMonth, 100, 'Interest', 'Bank', catId, 'credit', otherAccId);
+
+    // Inter-account transfers (should be EXCLUDED from both income and spending)
+    // Transfer from spending to savings: debit on spending account, counterparty contains savings IBAN
+    insert.run(thisMonth, 300, 'Transfer to savings ' + savingsIban, savingsIban, catId, 'debit', spendingAccId);
+    // Transfer from savings to spending: credit on income account, counterparty contains spending IBAN
+    insert.run(thisMonth, 150, 'Transfer from current ' + spendingIban, spendingIban, catId, 'credit', incomeAccId);
   })();
 });
 
 afterAll(() => cleanup({ db, dbPath }));
 
 describe('Account-aware summary', () => {
-  it('only counts spending account debits as total_spent', async () => {
+  it('only counts spending account debits as total_spent, excluding inter-account transfers', async () => {
     const res = await request(app).get('/api/reports/summary').set(auth(tok));
     expect(res.status).toBe(200);
-    // 100 + 50 = 150 (only spending account debits)
+    // 100 + 50 = 150 (only spending account debits, 300 transfer to savings excluded)
     expect(res.body.totals.total_spent).toBe(150);
   });
 
-  it('counts income account credits + salary credits as total_income', async () => {
+  it('counts income account credits + salary credits as total_income, excluding inter-account transfers', async () => {
     const res = await request(app).get('/api/reports/summary').set(auth(tok));
     expect(res.status).toBe(200);
     // 3000 (Amazon salary) + 800 (rent) = 3800
-    // The 500 transfer and 100 interest should NOT count
+    // The 500 non-salary transfer, 100 interest, and 150 inter-account transfer should NOT count
     expect(res.body.totals.total_income).toBe(3800);
   });
 });
 
 describe('Account-aware monthly trend', () => {
-  it('uses account roles for spent/income in trend', async () => {
+  it('uses account roles for spent/income in trend, excluding inter-account transfers', async () => {
     const res = await request(app)
       .get('/api/reports/monthly-trend?months=2')
       .set(auth(tok));
     expect(res.status).toBe(200);
     expect(res.body.length).toBeGreaterThanOrEqual(1);
     const month = res.body[res.body.length - 1];
+    // 100 + 50 = 150 (300 transfer excluded)
     expect(month.spent).toBe(150);
+    // 3000 + 800 = 3800 (150 transfer excluded)
     expect(month.income).toBe(3800);
   });
 });
@@ -122,10 +133,10 @@ describe('Account balances endpoint', () => {
       .get('/api/reports/account-balances')
       .set(auth(tok));
     const acc = res.body.accounts.find(a => a.id === spendingAccId);
-    // Credits: 3000 + 500 = 3500, Debits: 100 + 50 = 150, Balance: 3350
+    // Credits: 3000 + 500 = 3500, Debits: 100 + 50 + 300 = 450, Balance: 3050
     expect(acc.total_in).toBe(3500);
-    expect(acc.total_out).toBe(150);
-    expect(acc.balance).toBe(3350);
+    expect(acc.total_out).toBe(450);
+    expect(acc.balance).toBe(3050);
   });
 });
 
@@ -145,5 +156,29 @@ describe('Uncategorized filter', () => {
     expect(res.status).toBe(200);
     expect(res.body.transactions.length).toBeGreaterThanOrEqual(1);
     expect(res.body.transactions.every(t => t.category_id === null)).toBe(true);
+  });
+});
+
+describe('Inter-account transfer exclusion', () => {
+  it('excludes transfers to own accounts from spending', async () => {
+    const res = await request(app).get('/api/reports/summary').set(auth(tok));
+    // The 300 debit to savings IBAN should NOT be counted as spending
+    // Only 100 (AH) + 50 (NS) = 150
+    expect(res.body.totals.total_spent).toBe(150);
+  });
+
+  it('excludes transfers from own accounts from income', async () => {
+    const res = await request(app).get('/api/reports/summary').set(auth(tok));
+    // The 150 credit from spending IBAN should NOT be counted as income
+    // Only 3000 (Amazon salary) + 800 (rent) = 3800
+    expect(res.body.totals.total_income).toBe(3800);
+  });
+
+  it('still includes transfers in account balances (raw in/out)', async () => {
+    const res = await request(app).get('/api/reports/account-balances').set(auth(tok));
+    const spending = res.body.accounts.find(a => a.id === spendingAccId);
+    // Spending account: credits 3000+500 = 3500, debits 100+50+300 = 450
+    expect(spending.total_in).toBe(3500);
+    expect(spending.total_out).toBe(450);
   });
 });

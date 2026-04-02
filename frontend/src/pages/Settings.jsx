@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
-import { Save, RefreshCw, Wifi } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Save, RefreshCw, Wifi, Download, Upload, Database, FileJson, AlertTriangle } from 'lucide-react';
 import { api } from '../utils/api';
-import { Toast } from '../components/UI';
+import { Toast, Modal } from '../components/UI';
 
 const TIMEOUT_OPTIONS = [
   { label: '5 minutes',  value: 5 },
@@ -49,6 +49,14 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [exportingConfig, setExportingConfig] = useState(false);
+  const [importingConfig, setImportingConfig] = useState(false);
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
+  const [restoreFile, setRestoreFile] = useState(null);
+  const dbFileRef = useRef(null);
+  const configFileRef = useRef(null);
 
   function showToast(message, type = 'success') {
     setToast({ message, type });
@@ -89,6 +97,75 @@ export default function Settings() {
 
   function set(key, value) {
     setSettings(s => ({ ...s, [key]: value }));
+  }
+
+  async function handleBackup() {
+    setBackingUp(true);
+    try {
+      await api.backup();
+      showToast('Database backup downloaded');
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      setBackingUp(false);
+    }
+  }
+
+  function handleRestoreSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRestoreFile(file);
+    setShowRestoreConfirm(true);
+    e.target.value = '';
+  }
+
+  async function handleRestoreConfirm() {
+    if (!restoreFile) return;
+    setRestoring(true);
+    try {
+      await api.restore(restoreFile);
+      showToast('Database restored. Reloading…');
+      setShowRestoreConfirm(false);
+      setRestoreFile(null);
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  async function handleExportConfig() {
+    setExportingConfig(true);
+    try {
+      await api.exportConfig();
+      showToast('Configuration exported');
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      setExportingConfig(false);
+    }
+  }
+
+  async function handleImportConfig(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setImportingConfig(true);
+    try {
+      const text = await file.text();
+      const config = JSON.parse(text);
+      const result = await api.importConfig(config);
+      const { imported } = result;
+      showToast(`Imported: ${imported.settings} settings, ${imported.accounts} accounts, ${imported.categories} categories, ${imported.rules} rules`);
+      // Reload settings and accounts
+      api.getSettings().then(setSettings);
+      api.getAccounts().then(setAccounts);
+    } catch (e) {
+      showToast(e.message || 'Invalid configuration file', 'error');
+    } finally {
+      setImportingConfig(false);
+    }
   }
 
   if (!settings) {
@@ -238,12 +315,97 @@ export default function Settings() {
             onChange={e => set('salary_keywords', e.target.value)}
             placeholder="e.g. Amazon,Workiva" />
         </div>
+        <div style={{ marginTop: 18 }}>
+          <label style={labelStyle}>Income Account Keywords</label>
+          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
+            If set, only credits into the income account matching these keywords count as income (e.g. rent payments). Leave empty to count all non-transfer credits.
+          </p>
+          <input style={inputStyle} value={settings.income_keywords || ''}
+            onChange={e => set('income_keywords', e.target.value)}
+            placeholder="e.g. Huur,Rent" />
+        </div>
       </Section>
 
       <button style={btnPrimary} onClick={handleSave} disabled={saving}>
         <Save size={14} />
         {saving ? 'Saving…' : 'Save Settings'}
       </button>
+
+      {/* Configuration Backup */}
+      <div style={{ marginTop: 40, marginBottom: 8 }}>
+        <h2 style={{ fontFamily: 'Playfair Display', fontSize: 20, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+          Backup & Restore
+        </h2>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>Manage your data and configuration</p>
+      </div>
+
+      <Section
+        title="Configuration"
+        subtitle="Export or import your settings, accounts, categories, and auto-rules as a portable JSON file. Does not include transactions."
+      >
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button style={btnPrimary} onClick={handleExportConfig} disabled={exportingConfig}>
+            <FileJson size={14} />
+            {exportingConfig ? 'Exporting…' : 'Export Config'}
+          </button>
+          <button style={{ ...btnPrimary, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}
+            onClick={() => configFileRef.current?.click()} disabled={importingConfig}>
+            <Upload size={14} />
+            {importingConfig ? 'Importing…' : 'Import Config'}
+          </button>
+          <input ref={configFileRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportConfig} />
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 12 }}>
+          Importing merges with existing data — duplicates are skipped, settings are overwritten.
+        </p>
+      </Section>
+
+      <Section
+        title="Full Database"
+        subtitle="Download or restore the entire SQLite database file, including all transactions, users, and configuration."
+      >
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button style={btnPrimary} onClick={handleBackup} disabled={backingUp}>
+            <Database size={14} />
+            {backingUp ? 'Downloading…' : 'Download Database'}
+          </button>
+          <button style={{ ...btnPrimary, background: '#ef444418', color: '#ef4444', border: '1px solid #ef444433' }}
+            onClick={() => dbFileRef.current?.click()} disabled={restoring}>
+            <Upload size={14} />
+            {restoring ? 'Restoring…' : 'Restore Database'}
+          </button>
+          <input ref={dbFileRef} type="file" accept=".db,.sqlite" style={{ display: 'none' }} onChange={handleRestoreSelect} />
+        </div>
+        <p style={{ fontSize: 11, color: '#ef4444', marginTop: 12 }}>
+          ⚠ Restoring a database replaces ALL current data and restarts the server.
+        </p>
+      </Section>
+
+      {showRestoreConfirm && (
+        <Modal title="Restore Database" onClose={() => { setShowRestoreConfirm(false); setRestoreFile(null); }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 20 }}>
+            <AlertTriangle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <p style={{ fontSize: 13, color: 'var(--text)', margin: '0 0 8px' }}>
+                This will replace your entire database with <strong>{restoreFile?.name}</strong>.
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+                All current transactions, categories, settings, and users will be overwritten. The server will restart after restore. This cannot be undone.
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button style={{ ...btnPrimary, background: '#ef4444', color: 'white', flex: 1 }}
+              onClick={handleRestoreConfirm} disabled={restoring}>
+              {restoring ? 'Restoring…' : 'Yes, restore database'}
+            </button>
+            <button style={{ ...btnPrimary, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}
+              onClick={() => { setShowRestoreConfirm(false); setRestoreFile(null); }}>
+              Cancel
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -419,6 +419,106 @@ function CategoryTrends({ months, categories }) {
   );
 }
 
+// ─── Account Balances Over Time tab ────────────────────────────────────────
+
+function BalanceHistory({ balanceHistory }) {
+  const [range, setRange] = useState(12);
+  const { accounts, data: allData } = balanceHistory;
+
+  const data = useMemo(() => {
+    const sliced = allData.slice(-range);
+    return sliced.map(d => ({
+      ...d,
+      label: fmtMonth(d.month),
+    }));
+  }, [allData, range]);
+
+  if (!data.length) return <EmptyState icon="💰" title="No balance data" subtitle="Import transactions to see balance history" />;
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h3 style={{ ...cardTitle, marginBottom: 0 }}>Total Balance Over Time</h3>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[6, 12, 18, 24].map(r => (
+              <button key={r} onClick={() => setRange(r)} style={{
+                padding: '4px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                border: '1px solid', fontFamily: 'inherit',
+                borderColor: range === r ? 'var(--accent)' : 'var(--border)',
+                background: range === r ? 'var(--accent)15' : 'transparent',
+                color: range === r ? 'var(--accent)' : 'var(--text-muted)',
+              }}>{r}M</button>
+            ))}
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={280}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--text-dim)' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: 'var(--text-dim)' }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+            <Tooltip content={<ChartTooltip />} />
+            <Legend wrapperStyle={{ fontSize: 12, color: 'var(--text-muted)' }} />
+            <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="3 3" />
+            <Line type="monotone" dataKey="total" name="Total" stroke="var(--accent)" strokeWidth={3} dot={false} activeDot={{ r: 5 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3 style={cardTitle}>Per-Account Balance Over Time</h3>
+        <ResponsiveContainer width="100%" height={280}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--text-dim)' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: 'var(--text-dim)' }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+            <Tooltip content={<ChartTooltip />} />
+            <Legend wrapperStyle={{ fontSize: 12, color: 'var(--text-muted)' }} />
+            <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="3 3" />
+            {accounts.map(a => (
+              <Line key={a.id} type="monotone" dataKey={a.key} name={a.name} stroke={a.color} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="card">
+        <h3 style={cardTitle}>Monthly Balance Table</h3>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="table">
+            <thead><tr>
+              <th>Month</th>
+              {accounts.map(a => <th key={a.id} style={{ textAlign: 'right' }}>{a.name}</th>)}
+              <th style={{ textAlign: 'right' }}>Total</th>
+            </tr></thead>
+            <tbody>
+              {data.slice().reverse().map((row, i) => (
+                <tr key={i}>
+                  <td style={{ fontWeight: 500, color: 'var(--text)' }}>{row.label}</td>
+                  {accounts.map(a => (
+                    <td key={a.id} style={{
+                      textAlign: 'right', fontFamily: 'DM Mono', fontSize: 13,
+                      color: (row[a.key] || 0) >= 0 ? 'var(--green)' : 'var(--red)',
+                    }}>
+                      {fmt(row[a.key] || 0)}
+                    </td>
+                  ))}
+                  <td style={{
+                    textAlign: 'right', fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600,
+                    color: row.total >= 0 ? 'var(--green)' : 'var(--red)',
+                  }}>
+                    {fmt(row.total)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Card title style ──────────────────────────────────────────────────────
 
 const cardTitle = {
@@ -432,6 +532,7 @@ const TABS = [
   { id: 'mom', label: 'Month over Month', icon: BarChart2 },
   { id: 'yoy', label: 'Year over Year', icon: GitCompare },
   { id: 'categories', label: 'Category Trends', icon: Layers },
+  { id: 'balances', label: 'Account Balances', icon: Wallet },
 ];
 
 export default function Reporting() {
@@ -440,6 +541,7 @@ export default function Reporting() {
   const [catTrend, setCatTrend] = useState({ months: [], categories: [] });
   const [yoy, setYoy] = useState({ years: [], data: [] });
   const [balances, setBalances] = useState(null);
+  const [balanceHistory, setBalanceHistory] = useState({ months: [], accounts: [], data: [] });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -448,11 +550,13 @@ export default function Reporting() {
       api.getCategoryTrend(18),
       api.getYoY(),
       api.getAccountBalances(),
-    ]).then(([t, ct, y, b]) => {
+      api.getBalanceHistory(24),
+    ]).then(([t, ct, y, b, bh]) => {
       setTrend(t);
       setCatTrend(ct);
       setYoy(y);
       setBalances(b);
+      setBalanceHistory(bh);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
@@ -576,6 +680,7 @@ export default function Reporting() {
           {tab === 'categories' && (
             <CategoryTrends months={catTrend.months} categories={catTrend.categories} />
           )}
+          {tab === 'balances' && <BalanceHistory balanceHistory={balanceHistory} />}
         </>
       )}
     </div>

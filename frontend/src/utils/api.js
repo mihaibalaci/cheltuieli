@@ -105,6 +105,21 @@ export const api = {
     return req('POST', '/restore', form, true);
   },
 
+  // Configuration export/import
+  exportConfig: async () => {
+    const token = getToken();
+    const res = await fetch(BASE + '/config/export', { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cheltuieli-config-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  importConfig: (data) => req('POST', '/config/import', data),
+
   // Reports
   getSummary: (params = {}) => {
     const qs = new URLSearchParams(Object.entries(params).filter(([,v]) => v));
@@ -122,4 +137,5 @@ export const api = {
     const qs = new URLSearchParams(Object.entries(params).filter(([,v]) => v));
     return req('GET', `/reports/account-balances?${qs}`);
   },
+  getBalanceHistory: (months = 12) => req('GET', `/reports/balance-history?months=${months}`),
 };

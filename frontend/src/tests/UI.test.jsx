@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { Modal, Toast, EmptyState, Loader, CategoryBadge, AmountDisplay, CategorySelect } from '../components/UI';
+import { Modal, Toast, EmptyState, Loader, CategoryBadge, AmountDisplay, CategorySelect, SearchableCategorySelect } from '../components/UI';
 
 describe('Modal', () => {
   it('renders title and children', () => {
@@ -103,5 +103,89 @@ describe('CategorySelect', () => {
     render(<CategorySelect categories={categories} value="" onChange={onChange} />);
     fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } });
     expect(onChange).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe('SearchableCategorySelect', () => {
+  const categories = [
+    { id: 1, name: 'Groceries', icon: '🛒', parent_id: null },
+    { id: 2, name: 'Transport', icon: '🚌', parent_id: null },
+    { id: 3, name: 'Bus', icon: '🚍', parent_id: 2 },
+    { id: 4, name: 'Dining', icon: '🍽️', parent_id: null },
+  ];
+
+  it('renders with empty label when no value selected', () => {
+    render(<SearchableCategorySelect categories={categories} value="" onChange={() => {}} emptyLabel="All categories" />);
+    expect(screen.getByText('All categories')).toBeInTheDocument();
+  });
+
+  it('shows selected category name when value is set', () => {
+    render(<SearchableCategorySelect categories={categories} value="1" onChange={() => {}} />);
+    expect(screen.getByText('🛒 Groceries')).toBeInTheDocument();
+  });
+
+  it('opens dropdown on click and shows search input', () => {
+    render(<SearchableCategorySelect categories={categories} value="" onChange={() => {}} />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByPlaceholderText('Search categories...')).toBeInTheDocument();
+  });
+
+  it('filters categories by search text', () => {
+    render(<SearchableCategorySelect categories={categories} value="" onChange={() => {}} />);
+    fireEvent.click(screen.getByRole('button'));
+    const searchInput = screen.getByPlaceholderText('Search categories...');
+    fireEvent.change(searchInput, { target: { value: 'groc' } });
+    // Should show Groceries, not Transport or Dining
+    expect(screen.getByText('Groceries')).toBeInTheDocument();
+    expect(screen.queryByText('Transport')).not.toBeInTheDocument();
+    expect(screen.queryByText('Dining')).not.toBeInTheDocument();
+  });
+
+  it('shows child categories when parent matches search', () => {
+    render(<SearchableCategorySelect categories={categories} value="" onChange={() => {}} />);
+    fireEvent.click(screen.getByRole('button'));
+    const searchInput = screen.getByPlaceholderText('Search categories...');
+    fireEvent.change(searchInput, { target: { value: 'transport' } });
+    // Parent matches, so child Bus should also appear
+    expect(screen.getByText('Transport')).toBeInTheDocument();
+    expect(screen.getByText('Bus')).toBeInTheDocument();
+  });
+
+  it('calls onChange when an option is clicked', () => {
+    const onChange = vi.fn();
+    render(<SearchableCategorySelect categories={categories} value="" onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByText('Groceries'));
+    expect(onChange).toHaveBeenCalledWith({ target: { value: '1' } });
+  });
+
+  it('renders extra options', () => {
+    render(
+      <SearchableCategorySelect
+        categories={categories}
+        value=""
+        onChange={() => {}}
+        extraOptions={[{ value: 'none', label: '⚠ Uncategorized' }]}
+      />
+    );
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('⚠ Uncategorized')).toBeInTheDocument();
+  });
+
+  it('shows no results message when search has no matches', () => {
+    render(<SearchableCategorySelect categories={categories} value="" onChange={() => {}} />);
+    fireEvent.click(screen.getByRole('button'));
+    const searchInput = screen.getByPlaceholderText('Search categories...');
+    fireEvent.change(searchInput, { target: { value: 'zzzzz' } });
+    expect(screen.getByText('No categories found')).toBeInTheDocument();
+  });
+
+  it('closes dropdown on Escape key', () => {
+    render(<SearchableCategorySelect categories={categories} value="" onChange={() => {}} />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByPlaceholderText('Search categories...')).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByPlaceholderText('Search categories...'), { key: 'Escape' });
+    expect(screen.queryByPlaceholderText('Search categories...')).not.toBeInTheDocument();
   });
 });

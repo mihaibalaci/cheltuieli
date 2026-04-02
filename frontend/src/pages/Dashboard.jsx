@@ -146,6 +146,9 @@ export default function Dashboard({ onNavigate }) {
               onClick={() => onNavigate?.('transactions', { type: 'debit', period })} />
             <StatCard label="Total Income" value={fmt(summary.totals?.total_income)}
               icon={TrendingUp} color="var(--green)"
+              sub={summary.incomeBreakdown
+                ? `Salary ${fmt(summary.incomeBreakdown.salary)} · Rent ${fmt(summary.incomeBreakdown.rent)}`
+                : 'Salaries + rent income'}
               onClick={() => onNavigate?.('transactions', { type: 'credit', period })} />
             <StatCard label="Net Balance" value={fmt(Math.abs(net))}
               icon={CreditCard} color={net >= 0 ? 'var(--green)' : 'var(--red)'}

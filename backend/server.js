@@ -288,27 +288,73 @@ function fxCaseExpr(amountCol = 't.amount') {
 
 // Helper: read account role settings (spending_account_id, income_account_id, salary_keywords)
 function getAccountRoles() {
-  const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('spending_account_id','income_account_id','salary_keywords')").all();
+  const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('spending_account_id','income_account_id','salary_keywords','income_keywords')").all();
   const m = {};
   rows.forEach(r => m[r.key] = r.value);
   return {
     spendingId: m.spending_account_id ? parseInt(m.spending_account_id) : null,
     incomeId: m.income_account_id ? parseInt(m.income_account_id) : null,
     salaryKeywords: (m.salary_keywords || 'Amazon,Workiva').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+    incomeKeywords: m.income_keywords ? m.income_keywords.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [],
   };
 }
 
+// Helper: build SQL condition that excludes inter-account transfers.
+// Detection method 1: counterparty or description contains one of your own account IBANs.
+// Detection method 2: a matching debit+credit pair exists on the same date with the same amount across two of your accounts.
+function notTransferExpr() {
+  const ibans = db.prepare('SELECT iban FROM accounts').all().map(a => a.iban.replace(/\s+/g, ''));
+  const accountIds = db.prepare('SELECT id FROM accounts').all().map(a => a.id);
+  const parts = [];
+
+  // Method 1: IBAN in counterparty or description
+  if (ibans.length) {
+    const checks = ibans.map(iban => {
+      const escaped = iban.replace(/'/g, "''");
+      return `t.counterparty LIKE '%${escaped}%' OR t.description LIKE '%${escaped}%'`;
+    });
+    parts.push(`(${checks.join(' OR ')})`);
+  }
+
+  // Method 2: matching pair across own accounts (same date, same amount, one debit one credit)
+  if (accountIds.length >= 2) {
+    const idList = accountIds.join(',');
+    parts.push(`EXISTS (
+      SELECT 1 FROM transactions t2
+      WHERE t2.id != t.id
+        AND t2.date = t.date
+        AND t2.amount = t.amount
+        AND t2.account_id IN (${idList})
+        AND t.account_id IN (${idList})
+        AND t2.account_id != t.account_id
+        AND t2.transaction_type != t.transaction_type
+    )`);
+  }
+
+  if (!parts.length) return '1=1';
+  return `NOT (${parts.join(' OR ')})`;
+}
+
 // Build SQL expression for "is this transaction income?" based on account roles
-// Income = all credits into income account + salary credits into spending account
+// Income = salary credits (by keyword) into spending account + rent/income credits into income account
+// Excludes inter-account transfers. If income_keywords are set, only matching credits on the income account count.
 function incomeExpr(fx) {
-  const { spendingId, incomeId, salaryKeywords } = getAccountRoles();
+  const { spendingId, incomeId, salaryKeywords, incomeKeywords } = getAccountRoles();
+  const noTransfer = notTransferExpr();
   if (!incomeId && !spendingId) {
-    // Fallback: old behavior
-    return `CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE 0 END`;
+    // Fallback: old behavior but exclude transfers
+    return `CASE WHEN t.transaction_type='credit' AND (${noTransfer}) THEN ${fx} ELSE 0 END`;
   }
   const parts = [];
   if (incomeId) {
-    parts.push(`(t.transaction_type='credit' AND t.account_id = ${incomeId})`);
+    if (incomeKeywords.length) {
+      // Only credits matching income keywords on the income account
+      const like = incomeKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%' OR LOWER(t.description) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ');
+      parts.push(`(t.transaction_type='credit' AND t.account_id = ${incomeId} AND (${like}))`);
+    } else {
+      // All credits into income account, but not from own accounts
+      parts.push(`(t.transaction_type='credit' AND t.account_id = ${incomeId} AND (${noTransfer}))`);
+    }
   }
   if (spendingId && salaryKeywords.length) {
     const like = salaryKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ');
@@ -319,13 +365,14 @@ function incomeExpr(fx) {
 }
 
 // Build SQL expression for "is this transaction spending?"
-// Spending = debits from spending account only
+// Spending = debits from spending account, excluding inter-account transfers
 function spentExpr(fx) {
   const { spendingId } = getAccountRoles();
+  const noTransfer = notTransferExpr();
   if (!spendingId) {
-    return `CASE WHEN t.transaction_type='debit' THEN ${fx} ELSE 0 END`;
+    return `CASE WHEN t.transaction_type='debit' AND (${noTransfer}) THEN ${fx} ELSE 0 END`;
   }
-  return `CASE WHEN t.transaction_type='debit' AND t.account_id = ${spendingId} THEN ${fx} ELSE 0 END`;
+  return `CASE WHEN t.transaction_type='debit' AND t.account_id = ${spendingId} AND (${noTransfer}) THEN ${fx} ELSE 0 END`;
 }
 
 // ===================== ACCOUNTS =====================
@@ -805,11 +852,43 @@ app.get('/api/reports/summary', (req, res) => {
     FROM transactions t WHERE 1=1 ${dateFilter}
   `).get(...params);
 
+  // Income breakdown: salary vs rent
+  const { spendingId, incomeId, salaryKeywords, incomeKeywords } = getAccountRoles();
+  const noTransfer = notTransferExpr();
+  let salaryIncome = 0;
+  let rentIncome = 0;
+
+  if (spendingId && salaryKeywords.length) {
+    const like = salaryKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ');
+    const r = db.prepare(`
+      SELECT COALESCE(SUM(${fx}), 0) as total FROM transactions t
+      WHERE t.transaction_type='credit' AND t.account_id = ${spendingId} AND (${like}) ${dateFilter}
+    `).get(...params);
+    salaryIncome = r.total;
+  }
+
+  if (incomeId) {
+    if (incomeKeywords.length) {
+      const like = incomeKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%' OR LOWER(t.description) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ');
+      const r = db.prepare(`
+        SELECT COALESCE(SUM(${fx}), 0) as total FROM transactions t
+        WHERE t.transaction_type='credit' AND t.account_id = ${incomeId} AND (${like}) ${dateFilter}
+      `).get(...params);
+      rentIncome = r.total;
+    } else {
+      const r = db.prepare(`
+        SELECT COALESCE(SUM(${fx}), 0) as total FROM transactions t
+        WHERE t.transaction_type='credit' AND t.account_id = ${incomeId} AND (${noTransfer}) ${dateFilter}
+      `).get(...params);
+      rentIncome = r.total;
+    }
+  }
+
   const uncategorized = db.prepare(`
     SELECT COUNT(*) as c FROM transactions WHERE category_id IS NULL ${dateFilter}
   `).get(...params).c;
 
-  res.json({ byCategory, totals, uncategorized });
+  res.json({ byCategory, totals, uncategorized, incomeBreakdown: { salary: salaryIncome, rent: rentIncome } });
 });
 
 app.get('/api/reports/monthly-trend', (req, res) => {
@@ -901,9 +980,68 @@ app.get('/api/reports/account-balances', (req, res) => {
   res.json({ accounts: balances, total });
 });
 
+// Account balances over time — monthly running totals per account
+app.get('/api/reports/balance-history', (req, res) => {
+  const { months = 12 } = req.query;
+  const fx = fxCaseExpr();
+  const accountIds = db.prepare('SELECT id, name, color FROM accounts ORDER BY name').all();
+
+  if (!accountIds.length) return res.json({ months: [], accounts: [], data: [] });
+
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', t.date) as month,
+      t.account_id,
+      SUM(CASE WHEN t.transaction_type='credit' THEN ${fx} ELSE -${fx} END) as net
+    FROM transactions t
+    WHERE t.account_id IS NOT NULL
+    GROUP BY month, t.account_id
+    ORDER BY month ASC
+  `).all();
+
+  // Build monthly net per account
+  const monthlyNet = {};
+  for (const r of rows) {
+    if (!monthlyNet[r.month]) monthlyNet[r.month] = {};
+    monthlyNet[r.month][r.account_id] = r.net;
+  }
+
+  const allMonths = Object.keys(monthlyNet).sort();
+  const sliced = allMonths.slice(-parseInt(months));
+
+  // Compute running balance
+  const running = {};
+  accountIds.forEach(a => { running[a.id] = 0; });
+
+  const data = [];
+  for (const m of allMonths) {
+    for (const a of accountIds) {
+      running[a.id] += (monthlyNet[m]?.[a.id] || 0);
+    }
+    if (sliced.includes(m)) {
+      const point = { month: m };
+      let total = 0;
+      for (const a of accountIds) {
+        point[`acc_${a.id}`] = Math.round(running[a.id] * 100) / 100;
+        total += running[a.id];
+      }
+      point.total = Math.round(total * 100) / 100;
+      data.push(point);
+    }
+  }
+
+  res.json({
+    months: sliced,
+    accounts: accountIds.map(a => ({ id: a.id, name: a.name, color: a.color, key: `acc_${a.id}` })),
+    data,
+  });
+});
+
 // ===================== BACKUP & RESTORE =====================
 
 const restoreUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
+
+// --- Full database backup/restore ---
 
 app.get('/api/backup', async (req, res) => {
   const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/cheltuieli.db');
@@ -946,6 +1084,98 @@ app.post('/api/restore', restoreUpload.single('file'), (req, res) => {
   } catch (e) {
     try { fs.unlinkSync(tmpPath); } catch {}
     res.status(400).json({ error: 'Restore failed: ' + e.message });
+  }
+});
+
+// --- Configuration export/import (settings, accounts, categories, rules — no transactions) ---
+
+app.get('/api/config/export', (req, res) => {
+  const config = {
+    version: 1,
+    exported_at: new Date().toISOString(),
+    settings: db.prepare('SELECT key, value FROM settings').all(),
+    accounts: db.prepare('SELECT name, iban, color FROM accounts').all(),
+    categories: db.prepare('SELECT name, color, icon, parent_id FROM categories').all().map(c => {
+      if (c.parent_id) {
+        const parent = db.prepare('SELECT name FROM categories WHERE id = ?').get(c.parent_id);
+        c.parent_name = parent ? parent.name : null;
+      }
+      delete c.parent_id;
+      return c;
+    }),
+    rules: db.prepare(`
+      SELECT r.keyword, r.match_field, r.priority, c.name as category_name
+      FROM auto_rules r LEFT JOIN categories c ON r.category_id = c.id
+    `).all(),
+  };
+  res.setHeader('Content-Disposition', `attachment; filename="cheltuieli-config-${new Date().toISOString().slice(0, 10)}.json"`);
+  res.setHeader('Content-Type', 'application/json');
+  res.json(config);
+});
+
+app.post('/api/config/import', express.json({ limit: '5mb' }), (req, res) => {
+  const config = req.body;
+  if (!config || !config.version) {
+    return res.status(400).json({ error: 'Invalid configuration file' });
+  }
+
+  const results = { settings: 0, accounts: 0, categories: 0, rules: 0 };
+
+  try {
+    db.transaction(() => {
+      // Import settings
+      if (config.settings?.length) {
+        const upsert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+        for (const s of config.settings) {
+          upsert.run(s.key, s.value);
+          results.settings++;
+        }
+      }
+
+      // Import accounts
+      if (config.accounts?.length) {
+        const insert = db.prepare('INSERT OR IGNORE INTO accounts (name, iban, color) VALUES (?, ?, ?)');
+        for (const a of config.accounts) {
+          const r = insert.run(a.name, a.iban, a.color || '#6366f1');
+          if (r.changes) results.accounts++;
+        }
+      }
+
+      // Import categories (parents first, then children)
+      if (config.categories?.length) {
+        const parents = config.categories.filter(c => !c.parent_name);
+        const children = config.categories.filter(c => c.parent_name);
+        const insertCat = db.prepare('INSERT OR IGNORE INTO categories (name, color, icon, parent_id) VALUES (?, ?, ?, ?)');
+
+        for (const c of parents) {
+          const r = insertCat.run(c.name, c.color || '#6366f1', c.icon || '📦', null);
+          if (r.changes) results.categories++;
+        }
+        for (const c of children) {
+          const parent = db.prepare('SELECT id FROM categories WHERE name = ?').get(c.parent_name);
+          const r = insertCat.run(c.name, c.color || '#6366f1', c.icon || '📦', parent ? parent.id : null);
+          if (r.changes) results.categories++;
+        }
+      }
+
+      // Import rules
+      if (config.rules?.length) {
+        const insertRule = db.prepare('INSERT INTO auto_rules (keyword, match_field, priority, category_id) VALUES (?, ?, ?, ?)');
+        for (const r of config.rules) {
+          const cat = db.prepare('SELECT id FROM categories WHERE name = ?').get(r.category_name);
+          if (!cat) continue;
+          // Skip if identical rule already exists
+          const exists = db.prepare('SELECT id FROM auto_rules WHERE keyword = ? AND category_id = ?').get(r.keyword, cat.id);
+          if (exists) continue;
+          insertRule.run(r.keyword, r.match_field || 'description', r.priority || 0, cat.id);
+          results.rules++;
+        }
+      }
+    })();
+
+    res.json({ ok: true, imported: results });
+  } catch (e) {
+    res.status(500).json({ error: 'Import failed: ' + e.message });
   }
 });
 

@@ -75,6 +75,28 @@ describe('GET /api/transactions', () => {
     expect(res.body.transactions.length).toBe(2);
     expect(res.body.total).toBe(4);
   });
+
+  it('sorts by date ascending', async () => {
+    const res = await request(app)
+      .get('/api/transactions?sort=asc')
+      .set(auth(tok));
+    expect(res.status).toBe(200);
+    const dates = res.body.transactions.map(t => t.date);
+    for (let i = 1; i < dates.length; i++) {
+      expect(dates[i] >= dates[i - 1]).toBe(true);
+    }
+  });
+
+  it('sorts by date descending by default', async () => {
+    const res = await request(app)
+      .get('/api/transactions')
+      .set(auth(tok));
+    expect(res.status).toBe(200);
+    const dates = res.body.transactions.map(t => t.date);
+    for (let i = 1; i < dates.length; i++) {
+      expect(dates[i] <= dates[i - 1]).toBe(true);
+    }
+  });
 });
 
 describe('PUT /api/transactions/:id', () => {

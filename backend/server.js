@@ -848,7 +848,7 @@ app.get('/api/reports/summary', (req, res) => {
   }
 
   const uncategorized = db.prepare(`
-    SELECT COUNT(*) as c FROM transactions WHERE category_id IS NULL ${dateFilter}
+    SELECT COUNT(*) as c FROM transactions t WHERE t.category_id IS NULL ${dateFilter}
   `).get(...params).c;
 
   res.json({ byCategory, totals, uncategorized, incomeBreakdown: { salary: salaryIncome } });

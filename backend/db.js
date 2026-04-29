@@ -114,8 +114,13 @@ if (settingsCount === 0) {
     ['fx_RON', '0.2007'],   // 1 RON = ~0.20 EUR
     ['fx_USD', '0.9200'],   // 1 USD = ~0.92 EUR
     ['fx_EUR', '1.0000'],
+    ['salary_keywords', 'Amazon,Workiva'],
   ].forEach(([k, v]) => ins.run(k, v));
 }
+
+// Ensure salary_keywords exists on existing databases (idempotent backfill)
+const insertIfMissing = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+insertIfMissing.run('salary_keywords', 'Amazon,Workiva');
 
 // Seed accounts if empty
 const accountCount = db.prepare('SELECT COUNT(*) as c FROM accounts').get().c;

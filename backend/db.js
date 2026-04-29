@@ -103,6 +103,8 @@ try { db.exec("ALTER TABLE users ADD COLUMN email TEXT"); } catch {}
 try { db.exec("ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES categories(id)"); } catch {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN details TEXT"); } catch {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN account_id INTEGER REFERENCES accounts(id)"); } catch {}
+try { db.exec("ALTER TABLE transactions ADD COLUMN is_transfer INTEGER DEFAULT 0"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_transactions_is_transfer ON transactions(is_transfer)"); } catch {}
 
 // Seed default settings if empty
 const settingsCount = db.prepare('SELECT COUNT(*) as c FROM settings').get().c;
@@ -132,6 +134,14 @@ if (accountCount === 0) {
     ['Rent Deposit',    '880287152', '#f59e0b'],
     ['Rent Income',     '867423439', '#8b5cf6'],
   ].forEach(a => insertAccount.run(...a));
+}
+
+// Backfill is_transfer for existing transactions based on IBAN match in description/counterparty.
+// Idempotent — sets is_transfer=1 only for rows that aren't yet flagged.
+const ibans = db.prepare('SELECT iban FROM accounts').all().map(a => a.iban.replace(/\s+/g, ''));
+if (ibans.length) {
+  const conds = ibans.map(i => `instr(counterparty, '${i.replace(/'/g, "''")}') > 0 OR instr(description, '${i.replace(/'/g, "''")}') > 0`).join(' OR ');
+  db.exec(`UPDATE transactions SET is_transfer = 1 WHERE is_transfer = 0 AND (${conds})`);
 }
 
 // Seed default categories if empty

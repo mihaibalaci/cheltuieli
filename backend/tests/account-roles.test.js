@@ -57,6 +57,11 @@ beforeAll(async () => {
     // Transfer from savings to spending: credit on income account, counterparty contains spending IBAN
     insert.run(thisMonth, 150, 'Transfer from current ' + spendingIban, spendingIban, catId, 'credit', incomeAccId);
   })();
+
+  // Backfill is_transfer flag (mirrors what db.js does on startup)
+  const ibans = db.prepare('SELECT iban FROM accounts').all().map(a => a.iban.replace(/\s+/g, ''));
+  const conds = ibans.map(i => `instr(counterparty, '${i}') > 0 OR instr(description, '${i}') > 0`).join(' OR ');
+  db.exec(`UPDATE transactions SET is_transfer = 1 WHERE is_transfer = 0 AND (${conds})`);
 });
 
 afterAll(() => cleanup({ db, dbPath }));

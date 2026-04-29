@@ -305,39 +305,20 @@ function getAccountRoles() {
 }
 
 // Helper: build SQL condition that excludes inter-account transfers.
-// Detection method 1: counterparty or description contains one of your own account IBANs.
-// Detection method 2: a matching debit+credit pair exists on the same date with the same amount across two of your accounts.
+// Uses the pre-computed is_transfer column (set at import time and backfilled at startup).
+// A transaction is a transfer when counterparty or description contains any of your own account IBANs.
 function notTransferExpr() {
-  const ibans = db.prepare('SELECT iban FROM accounts').all().map(a => a.iban.replace(/\s+/g, ''));
-  const accountIds = db.prepare('SELECT id FROM accounts').all().map(a => a.id);
-  const parts = [];
+  return 't.is_transfer = 0';
+}
 
-  // Method 1: IBAN in counterparty or description
-  if (ibans.length) {
-    const checks = ibans.map(iban => {
-      const escaped = iban.replace(/'/g, "''");
-      return `t.counterparty LIKE '%${escaped}%' OR t.description LIKE '%${escaped}%'`;
-    });
-    parts.push(`(${checks.join(' OR ')})`);
+// Helper: detect if a parsed transaction is an inter-account transfer based on IBAN presence.
+// Used during import to set the is_transfer flag.
+function detectIsTransfer(tx, ownIbans) {
+  const text = `${tx.description || ''} ${tx.counterparty || ''}`;
+  for (const iban of ownIbans) {
+    if (iban && text.includes(iban)) return 1;
   }
-
-  // Method 2: matching pair across own accounts (same date, same amount, one debit one credit)
-  if (accountIds.length >= 2) {
-    const idList = accountIds.join(',');
-    parts.push(`EXISTS (
-      SELECT 1 FROM transactions t2
-      WHERE t2.id != t.id
-        AND t2.date = t.date
-        AND t2.amount = t.amount
-        AND t2.account_id IN (${idList})
-        AND t.account_id IN (${idList})
-        AND t2.account_id != t.account_id
-        AND t2.transaction_type != t.transaction_type
-    )`);
-  }
-
-  if (!parts.length) return '1=1';
-  return `NOT (${parts.join(' OR ')})`;
+  return 0;
 }
 
 // Build SQL expression for "is this transaction income?" based on account roles
@@ -601,8 +582,11 @@ app.post('/api/import', upload.single('file'), (req, res) => {
 
     // Build account number → account_id lookup (normalize: strip spaces)
     const accountMap = {};
+    const ownIbans = [];
     db.prepare('SELECT id, iban FROM accounts').all().forEach(a => {
-      accountMap[a.iban.replace(/\s+/g, '')] = a.id;
+      const normalized = a.iban.replace(/\s+/g, '');
+      accountMap[normalized] = a.id;
+      ownIbans.push(normalized);
     });
     
     // Auto-categorize function
@@ -620,8 +604,8 @@ app.post('/api/import', upload.single('file'), (req, res) => {
     `);
 
     const insertStmt = db.prepare(`
-      INSERT INTO transactions (date, amount, description, counterparty, category_id, account_number, account_id, currency, transaction_type, source, import_batch)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'import', ?)
+      INSERT INTO transactions (date, amount, description, counterparty, category_id, account_number, account_id, currency, transaction_type, source, import_batch, is_transfer)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'import', ?, ?)
     `);
 
     let inserted = 0;
@@ -638,10 +622,11 @@ app.post('/api/import', upload.single('file'), (req, res) => {
         
         const normalizedIban = (tx.account_number || '').replace(/\s+/g, '');
         const accountId = accountMap[normalizedIban] || null;
+        const isTransfer = detectIsTransfer(tx, ownIbans);
         insertStmt.run(
           tx.date, tx.amount, tx.description || '', tx.counterparty || '',
           autoCategory(tx), tx.account_number || '', accountId, tx.currency || 'EUR',
-          tx.transaction_type || 'debit', batchId
+          tx.transaction_type || 'debit', batchId, isTransfer
         );
         inserted++;
       }

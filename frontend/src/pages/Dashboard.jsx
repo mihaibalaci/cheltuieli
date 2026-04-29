@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
-import { TrendingUp, TrendingDown, CreditCard, AlertCircle } from 'lucide-react';
+import { TrendingUp, TrendingDown, CreditCard, AlertCircle, PiggyBank } from 'lucide-react';
 import { api } from '../utils/api';
 import { Loader, EmptyState, PeriodSelector, CategoryBadge } from '../components/UI';
 
@@ -150,6 +150,16 @@ export default function Dashboard({ onNavigate }) {
                 ? `Salary: ${fmt(summary.incomeBreakdown.salary)}`
                 : 'Salary income only'}
               onClick={() => onNavigate?.('transactions', { type: 'credit', period })} />
+            {(() => {
+              const savings = balances?.accounts?.find(a => a.iban === '869898825');
+              if (!savings) return null;
+              return (
+                <StatCard label="Total Savings" value={fmt(savings.balance)}
+                  icon={PiggyBank} color="#22c55e"
+                  sub={period ? 'this period' : 'cumulative balance'}
+                  onClick={() => onNavigate?.('transactions', { account_id: savings.id, period })} />
+              );
+            })()}
             <StatCard label="Net Balance" value={fmt(Math.abs(net))}
               icon={CreditCard} color={net >= 0 ? 'var(--green)' : 'var(--red)'}
               sub={net >= 0 ? 'surplus' : 'deficit'} />

@@ -12,7 +12,7 @@ export default function Transactions({ categories, onRefresh, initialFilters }) 
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState(initialFilters?.uncategorized ? 'none' : '');
   const [filterType, setFilterType] = useState(initialFilters?.type || '');
-  const [filterAccount, setFilterAccount] = useState('');
+  const [filterAccount, setFilterAccount] = useState(initialFilters?.account_id ? String(initialFilters.account_id) : '');
   const [sortOrder, setSortOrder] = useState('desc');
   const [period, setPeriod] = useState(initialFilters?.period || '');
   const [periods, setPeriods] = useState([]);

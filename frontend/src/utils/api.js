@@ -56,9 +56,10 @@ export const api = {
   deleteTransaction: (id) => req('DELETE', `/transactions/${id}`),
 
   // Import
-  importFile: (file) => {
+  importFile: (file, accountId) => {
     const form = new FormData();
     form.append('file', file);
+    if (accountId) form.append('account_id', String(accountId));
     return req('POST', '/import', form, true);
   },
   getBatches: () => req('GET', '/import/batches'),

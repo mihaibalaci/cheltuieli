@@ -570,6 +570,9 @@ app.delete('/api/transactions/:id', (req, res) => {
 app.post('/api/import', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
+  // Optional account_id override — if provided, all transactions get assigned to this account
+  const overrideAccountId = req.body.account_id ? parseInt(req.body.account_id) : null;
+
   try {
     const transactions = parseABNAMROFile(req.file.buffer, req.file.originalname);
     
@@ -621,7 +624,7 @@ app.post('/api/import', upload.single('file'), (req, res) => {
         if (exists) { skipped++; continue; }
         
         const normalizedIban = (tx.account_number || '').replace(/\s+/g, '');
-        const accountId = accountMap[normalizedIban] || null;
+        const accountId = overrideAccountId || accountMap[normalizedIban] || null;
         const isTransfer = detectIsTransfer(tx, ownIbans);
         insertStmt.run(
           tx.date, tx.amount, tx.description || '', tx.counterparty || '',

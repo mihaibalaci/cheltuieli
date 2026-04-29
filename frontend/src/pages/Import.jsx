@@ -8,6 +8,8 @@ export default function Import({ categories, onRefresh }) {
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
   const [batches, setBatches] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [selectedAccount, setSelectedAccount] = useState('');
   const [toast, setToast] = useState(null);
   const [applyingRules, setApplyingRules] = useState(false);
   const inputRef = useRef();
@@ -19,6 +21,7 @@ export default function Import({ categories, onRefresh }) {
 
   useEffect(() => {
     api.getBatches().then(setBatches);
+    api.getAccounts().then(setAccounts);
   }, []);
 
   const handleFile = async (file) => {
@@ -26,7 +29,7 @@ export default function Import({ categories, onRefresh }) {
     setImporting(true);
     setResult(null);
     try {
-      const res = await api.importFile(file);
+      const res = await api.importFile(file, selectedAccount || null);
       setResult({ ...res, filename: file.name, ok: true });
       showToast(res.message, 'success');
       api.getBatches().then(setBatches);
@@ -69,6 +72,28 @@ export default function Import({ categories, onRefresh }) {
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
           Upload ABN AMRO exports: CSV, Excel (.xlsx), or MT940 format
+        </p>
+      </div>
+
+      {/* Account selector */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Assign transactions to account
+        </label>
+        <select
+          className="input"
+          style={{ width: '100%' }}
+          value={selectedAccount}
+          onChange={e => setSelectedAccount(e.target.value)}
+          disabled={importing}
+        >
+          <option value="">Auto-detect from file (IBAN matching)</option>
+          {accounts.map(a => (
+            <option key={a.id} value={a.id}>{a.name} — {a.iban}</option>
+          ))}
+        </select>
+        <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, marginBottom: 0 }}>
+          If your export file doesn't include account numbers or IBAN matching fails, select the target account here to override detection.
         </p>
       </div>
 

@@ -95,6 +95,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
   CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);
   CREATE INDEX IF NOT EXISTS idx_transactions_batch ON transactions(import_batch);
+  CREATE INDEX IF NOT EXISTS idx_transactions_transfer ON transactions(date, amount, account_id);
 `);
 
 // Migrations for existing databases

@@ -18,6 +18,13 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'cheltuieli-change-this-secret';
 const APP_URL = process.env.APP_URL || 'http://172.16.10.26:3001';
 
+// Global crash protection — log but don't exit the process
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled rejection at:', promise, 'reason:', reason);
+});
 // ===================== EMAIL =====================
 
 const transporter = nodemailer.createTransport({

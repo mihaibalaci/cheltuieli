@@ -18,10 +18,9 @@ beforeAll(async () => {
   const spendingIban = accounts[0].iban;
   const savingsIban = accounts[1].iban;
 
-  // Configure account roles
+  // Configure account roles — only spending account matters for income/spending
   await request(app).put('/api/settings').set(auth(tok)).send({
     spending_account_id: String(spendingAccId),
-    income_account_id: String(incomeAccId),
     salary_keywords: 'Amazon,Workiva',
   });
 
@@ -70,12 +69,12 @@ describe('Account-aware summary', () => {
     expect(res.body.totals.total_spent).toBe(150);
   });
 
-  it('counts income account credits + salary credits as total_income, excluding inter-account transfers', async () => {
+  it('counts only salary credits on spending account as total_income', async () => {
     const res = await request(app).get('/api/reports/summary').set(auth(tok));
     expect(res.status).toBe(200);
-    // 3000 (Amazon salary) + 800 (rent) = 3800
-    // The 500 non-salary transfer, 100 interest, and 150 inter-account transfer should NOT count
-    expect(res.body.totals.total_income).toBe(3800);
+    // Only 3000 (Amazon salary on spending account) counts as income
+    // 800 rent, 500 transfer, 100 interest, 150 inter-account transfer all excluded
+    expect(res.body.totals.total_income).toBe(3000);
   });
 });
 
@@ -89,8 +88,8 @@ describe('Account-aware monthly trend', () => {
     const month = res.body[res.body.length - 1];
     // 100 + 50 = 150 (300 transfer excluded)
     expect(month.spent).toBe(150);
-    // 3000 + 800 = 3800 (150 transfer excluded)
-    expect(month.income).toBe(3800);
+    // Only 3000 salary (rent excluded from income)
+    expect(month.income).toBe(3000);
   });
 });
 
@@ -169,9 +168,8 @@ describe('Inter-account transfer exclusion', () => {
 
   it('excludes transfers from own accounts from income', async () => {
     const res = await request(app).get('/api/reports/summary').set(auth(tok));
-    // The 150 credit from spending IBAN should NOT be counted as income
-    // Only 3000 (Amazon salary) + 800 (rent) = 3800
-    expect(res.body.totals.total_income).toBe(3800);
+    // Income = salary only (3000). Rent (800), transfers (150), interest (100) all excluded.
+    expect(res.body.totals.total_income).toBe(3000);
   });
 
   it('still includes transfers in account balances (raw in/out)', async () => {

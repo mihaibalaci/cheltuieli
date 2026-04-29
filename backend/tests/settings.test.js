@@ -58,22 +58,19 @@ describe('PUT /api/settings', () => {
 });
 
 describe('Account role settings', () => {
-  it('stores spending_account_id and income_account_id', async () => {
+  it('stores spending_account_id and salary_keywords', async () => {
     const accounts = (await request(app).get('/api/accounts').set(auth(tok))).body;
     const spendingId = accounts[0].id;
-    const incomeId = accounts[1].id;
 
     const res = await request(app)
       .put('/api/settings')
       .set(auth(tok))
       .send({
         spending_account_id: String(spendingId),
-        income_account_id: String(incomeId),
         salary_keywords: 'Amazon,Workiva',
       });
     expect(res.status).toBe(200);
     expect(res.body.spending_account_id).toBe(String(spendingId));
-    expect(res.body.income_account_id).toBe(String(incomeId));
     expect(res.body.salary_keywords).toBe('Amazon,Workiva');
   });
 });

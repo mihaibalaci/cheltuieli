@@ -282,12 +282,12 @@ export default function Settings() {
       {/* Account Roles */}
       <Section
         title="Account Roles"
-        subtitle="Configure which accounts count toward Income and Spending in reports."
+        subtitle="Configure which account is your main spending account and how salary income is identified."
       >
         <div style={{ marginBottom: 18 }}>
           <label style={labelStyle}>Spending Account</label>
           <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
-            Only debits from this account count toward Total Spent.
+            Only debits from this account count toward Total Spent. Inter-account transfers are always excluded.
           </p>
           <select style={inputStyle} value={settings.spending_account_id || ''}
             onChange={e => set('spending_account_id', e.target.value)}>
@@ -295,34 +295,14 @@ export default function Settings() {
             {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {a.iban}</option>)}
           </select>
         </div>
-        <div style={{ marginBottom: 18 }}>
-          <label style={labelStyle}>Income Account</label>
-          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
-            All credits into this account count as Income (e.g. rent collection).
-          </p>
-          <select style={inputStyle} value={settings.income_account_id || ''}
-            onChange={e => set('income_account_id', e.target.value)}>
-            <option value="">Not set (all accounts)</option>
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {a.iban}</option>)}
-          </select>
-        </div>
         <div>
           <label style={labelStyle}>Salary Keywords</label>
           <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
-            Credits into the spending account from counterparties matching these keywords also count as Income. Comma-separated.
+            Credits into the spending account from counterparties matching these keywords count as Income. Comma-separated. All other credits (rent, transfers, refunds) are excluded from income totals.
           </p>
           <input style={inputStyle} value={settings.salary_keywords || ''}
             onChange={e => set('salary_keywords', e.target.value)}
             placeholder="e.g. Amazon,Workiva" />
-        </div>
-        <div style={{ marginTop: 18 }}>
-          <label style={labelStyle}>Income Account Keywords</label>
-          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
-            If set, only credits into the income account matching these keywords count as income (e.g. rent payments). Leave empty to count all non-transfer credits.
-          </p>
-          <input style={inputStyle} value={settings.income_keywords || ''}
-            onChange={e => set('income_keywords', e.target.value)}
-            placeholder="e.g. Huur,Rent" />
         </div>
       </Section>
 

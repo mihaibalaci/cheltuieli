@@ -28,6 +28,11 @@ beforeAll(async () => {
     insert.run(m2b, 75,   'Dining',    'Restaurant',    catId, 'debit');
   })();
 
+  // Configure salary keywords so "Employer" credits count as income
+  await request(app).put('/api/settings').set(auth(tok)).send({
+    salary_keywords: 'Employer',
+  });
+
   // Also store fixed month/year for filter tests
   Object.assign(global, {
     testMonth1: String(now.getMonth()).padStart(2, '0') === '00' ? '12' : String(now.getMonth()).padStart(2, '0'),

@@ -123,6 +123,9 @@ if (settingsCount === 0) {
 // Ensure salary_keywords exists on existing databases (idempotent backfill)
 const insertIfMissing = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
 insertIfMissing.run('salary_keywords', 'Amazon,Workiva');
+insertIfMissing.run('exclude_transfers', '1');       // 1 = exclude inter-account transfers from spending/income
+insertIfMissing.run('include_rent_income', '0');     // 0 = only count salary as income, 1 = also count rent
+insertIfMissing.run('rent_keywords', 'Huur,Rent');   // keywords to identify rent income
 
 // Seed accounts if empty
 const accountCount = db.prepare('SELECT COUNT(*) as c FROM accounts').get().c;

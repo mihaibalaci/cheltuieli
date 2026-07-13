@@ -295,19 +295,25 @@ function fxCaseExpr(amountCol = 't.amount') {
 
 // Helper: read account role settings (spending_account_id, income_account_id, salary_keywords)
 function getAccountRoles() {
-  const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('spending_account_id','salary_keywords')").all();
+  const rows = db.prepare("SELECT key, value FROM settings WHERE key IN ('spending_account_id','salary_keywords','exclude_transfers','include_rent_income','rent_keywords')").all();
   const m = {};
   rows.forEach(r => m[r.key] = r.value);
   return {
     spendingId: m.spending_account_id ? parseInt(m.spending_account_id) : null,
     salaryKeywords: (m.salary_keywords || 'Amazon,Workiva').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+    excludeTransfers: m.exclude_transfers !== '0', // default true
+    includeRentIncome: m.include_rent_income === '1', // default false
+    rentKeywords: (m.rent_keywords || 'Huur,Rent').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
   };
 }
 
 // Helper: build SQL condition that excludes inter-account transfers.
 // Uses the pre-computed is_transfer column (set at import time and backfilled at startup).
 // A transaction is a transfer when counterparty or description contains any of your own account IBANs.
+// When exclude_transfers setting is off, this returns a no-op (always true).
 function notTransferExpr() {
+  const { excludeTransfers } = getAccountRoles();
+  if (!excludeTransfers) return '1=1';
   return 't.is_transfer = 0';
 }
 
@@ -322,28 +328,50 @@ function detectIsTransfer(tx, ownIbans) {
 }
 
 // Build SQL expression for "is this transaction income?" based on account roles
-// Income = salary credits (by keyword) into spending/current account ONLY.
-// Rent income on the rent account is excluded — it only affects account balances.
+// Income = salary credits (by keyword) into spending/current account.
+// Optionally includes rent income when include_rent_income is enabled.
+// Inter-account transfers are excluded when exclude_transfers is enabled.
 function incomeExpr(fx) {
-  const { spendingId, salaryKeywords } = getAccountRoles();
+  const { spendingId, salaryKeywords, includeRentIncome, rentKeywords } = getAccountRoles();
   const noTransfer = notTransferExpr();
-  if (!spendingId) {
-    // Fallback: no spending account set — count salary-keyword credits from any account, excluding transfers
-    if (salaryKeywords.length) {
-      const like = salaryKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ');
-      return `CASE WHEN t.transaction_type='credit' AND (${like}) AND (${noTransfer}) THEN ${fx} ELSE 0 END`;
-    }
-    return `CASE WHEN t.transaction_type='credit' AND (${noTransfer}) THEN ${fx} ELSE 0 END`;
-  }
-  if (!salaryKeywords.length) {
+
+  // Build salary condition
+  const salaryLike = salaryKeywords.length
+    ? salaryKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ')
+    : null;
+
+  // Build rent condition (only if enabled)
+  const rentLike = (includeRentIncome && rentKeywords.length)
+    ? rentKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%' OR LOWER(t.description) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ')
+    : null;
+
+  // Combine salary + rent into a single OR group
+  const incomeConds = [salaryLike, rentLike].filter(Boolean);
+  if (!incomeConds.length) {
     return `CASE WHEN 0 THEN ${fx} ELSE 0 END`; // no keywords = no income
   }
-  const like = salaryKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ');
-  return `CASE WHEN t.transaction_type='credit' AND t.account_id = ${spendingId} AND (${like}) THEN ${fx} ELSE 0 END`;
+  const combined = incomeConds.map(c => `(${c})`).join(' OR ');
+
+  if (!spendingId) {
+    // Fallback: no spending account set — count matching credits from any account
+    return `CASE WHEN t.transaction_type='credit' AND (${combined}) AND (${noTransfer}) THEN ${fx} ELSE 0 END`;
+  }
+
+  // With spending account set: salary must come into spending account, rent can come from any account
+  if (rentLike) {
+    const salaryExpr = salaryLike
+      ? `(t.account_id = ${spendingId} AND (${salaryLike}))`
+      : '0';
+    const rentExpr = `(${rentLike})`;
+    return `CASE WHEN t.transaction_type='credit' AND (${salaryExpr} OR ${rentExpr}) AND (${noTransfer}) THEN ${fx} ELSE 0 END`;
+  }
+
+  // Salary only, restricted to spending account
+  return `CASE WHEN t.transaction_type='credit' AND t.account_id = ${spendingId} AND (${salaryLike}) AND (${noTransfer}) THEN ${fx} ELSE 0 END`;
 }
 
 // Build SQL expression for "is this transaction spending?"
-// Spending = debits from spending account, excluding inter-account transfers
+// Spending = debits from spending account, excluding inter-account transfers (when enabled)
 function spentExpr(fx) {
   const { spendingId } = getAccountRoles();
   const noTransfer = notTransferExpr();
@@ -837,24 +865,35 @@ app.get('/api/reports/summary', (req, res) => {
     FROM transactions t WHERE 1=1 ${dateFilter}
   `).get(...params);
 
-  // Income breakdown: salary only (rent is balance-only, not counted as income)
-  const { spendingId, salaryKeywords } = getAccountRoles();
+  // Income breakdown: salary + optionally rent
+  const { spendingId, salaryKeywords, includeRentIncome, rentKeywords } = getAccountRoles();
   let salaryIncome = 0;
+  let rentIncome = 0;
 
-  if (spendingId && salaryKeywords.length) {
+  if (salaryKeywords.length) {
     const like = salaryKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ');
+    const accountFilter = spendingId ? `AND t.account_id = ${spendingId}` : '';
     const r = db.prepare(`
       SELECT COALESCE(SUM(${fx}), 0) as total FROM transactions t
-      WHERE t.transaction_type='credit' AND t.account_id = ${spendingId} AND (${like}) ${dateFilter}
+      WHERE t.transaction_type='credit' ${accountFilter} AND (${like}) ${dateFilter}
     `).get(...params);
     salaryIncome = r.total;
+  }
+
+  if (includeRentIncome && rentKeywords.length) {
+    const rentLike = rentKeywords.map(k => `LOWER(t.counterparty) LIKE '%${k.replace(/'/g, "''")}%' OR LOWER(t.description) LIKE '%${k.replace(/'/g, "''")}%'`).join(' OR ');
+    const r = db.prepare(`
+      SELECT COALESCE(SUM(${fx}), 0) as total FROM transactions t
+      WHERE t.transaction_type='credit' AND (${rentLike}) ${dateFilter}
+    `).get(...params);
+    rentIncome = r.total;
   }
 
   const uncategorized = db.prepare(`
     SELECT COUNT(*) as c FROM transactions t WHERE t.category_id IS NULL ${dateFilter}
   `).get(...params).c;
 
-  res.json({ byCategory, totals, uncategorized, incomeBreakdown: { salary: salaryIncome } });
+  res.json({ byCategory, totals, uncategorized, incomeBreakdown: { salary: salaryIncome, rent: rentIncome } });
 });
 
 app.get('/api/reports/monthly-trend', (req, res) => {

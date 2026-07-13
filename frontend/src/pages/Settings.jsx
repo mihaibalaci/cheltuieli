@@ -279,6 +279,42 @@ export default function Settings() {
         </div>
       </Section>
 
+      {/* Tracking & Income */}
+      <Section
+        title="Tracking & Income"
+        subtitle="Control what counts as spending and income. Exclude inter-account movements to get a clear picture of real expenses."
+      >
+        <div style={{ marginBottom: 18 }}>
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={settings.exclude_transfers === '1'}
+              onChange={e => set('exclude_transfers', e.target.checked ? '1' : '0')}
+              style={{ width: 16, height: 16, accentColor: 'var(--accent)' }}
+            />
+            <span>Exclude inter-account transfers</span>
+          </label>
+          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 6, marginLeft: 26 }}>
+            When enabled, any transaction moving money between your own accounts is excluded from spending and income totals.
+            Only payments to external parties count as expenses. This prevents transfers (e.g. to savings) from inflating your spending numbers.
+          </p>
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={settings.include_rent_income === '1'}
+              onChange={e => set('include_rent_income', e.target.checked ? '1' : '0')}
+              style={{ width: 16, height: 16, accentColor: 'var(--accent)' }}
+            />
+            <span>Include rent as income</span>
+          </label>
+          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 6, marginLeft: 26 }}>
+            When disabled, only salary credits (matching keywords below) count as income. Enable this to also count incoming rent payments in your income totals.
+          </p>
+        </div>
+      </Section>
+
       {/* Account Roles */}
       <Section
         title="Account Roles"
@@ -295,7 +331,7 @@ export default function Settings() {
             {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {a.iban}</option>)}
           </select>
         </div>
-        <div>
+        <div style={{ marginBottom: 18 }}>
           <label style={labelStyle}>Salary Keywords</label>
           <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
             Credits into the spending account from counterparties matching these keywords count as Income. Comma-separated. All other credits (rent, transfers, refunds) are excluded from income totals.
@@ -303,6 +339,15 @@ export default function Settings() {
           <input style={inputStyle} value={settings.salary_keywords || ''}
             onChange={e => set('salary_keywords', e.target.value)}
             placeholder="e.g. Amazon,Workiva" />
+        </div>
+        <div>
+          <label style={labelStyle}>Rent Keywords</label>
+          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
+            Credits matching these keywords count as rent income (only when "Include rent as income" is enabled above). Comma-separated.
+          </p>
+          <input style={inputStyle} value={settings.rent_keywords || ''}
+            onChange={e => set('rent_keywords', e.target.value)}
+            placeholder="e.g. Huur,Rent" />
         </div>
       </Section>
 

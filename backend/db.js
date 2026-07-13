@@ -95,7 +95,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
   CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);
   CREATE INDEX IF NOT EXISTS idx_transactions_batch ON transactions(import_batch);
-  CREATE INDEX IF NOT EXISTS idx_transactions_transfer ON transactions(date, amount, account_id);
 `);
 
 // Migrations for existing databases
@@ -104,6 +103,7 @@ try { db.exec("ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES ca
 try { db.exec("ALTER TABLE transactions ADD COLUMN details TEXT"); } catch {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN account_id INTEGER REFERENCES accounts(id)"); } catch {}
 try { db.exec("ALTER TABLE transactions ADD COLUMN is_transfer INTEGER DEFAULT 0"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_transactions_transfer ON transactions(date, amount, account_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_transactions_is_transfer ON transactions(is_transfer)"); } catch {}
 
 // Seed default settings if empty
